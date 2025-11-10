@@ -109,7 +109,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   let L = normalize(u.lightDir.xyz);
   let lambert = max(dot(N, L), 0.0);
   
-  let visibility = shadowVisibilityPCF(input.lightSpacePos); // зависит от метода
+  let visibility = shadowVisibility...(input.lightSpacePos); // зависит от метода
   
   let baseColor = vec3<f32>(0.7, 0.72, 0.75);
   let ambient = 0.15; // Уменьшено с 0.25

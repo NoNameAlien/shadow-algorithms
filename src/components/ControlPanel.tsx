@@ -20,15 +20,16 @@ export type ShadowParams = {
 export function ControlPanel({ onParamsChange, fps = 0 }: Props) {
     const [params, setParams] = useState<ShadowParams>({
         shadowMapSize: 2048,
-        bias: 0.005,
+        bias: 0.003,
         method: 'SM',
-        pcfRadius: 2.0,
-        pcfSamples: 16,
-        pcssLightSize: 0.05,
-        pcssBlockerSearchSamples: 16,
-        vsmMinVariance: 0.00001,
-        vsmLightBleedReduction: 0.3
+        pcfRadius: 2.5, // Уменьшен для производительности
+        pcfSamples: 8,  // ИЗМЕНЕНО с 16 на 8 для 2x ускорения
+        pcssLightSize: 0.08,
+        pcssBlockerSearchSamples: 8,
+        vsmMinVariance: 0.0001,
+        vsmLightBleedReduction: 0.4
     });
+
 
     const update = (partial: Partial<ShadowParams>) => {
         const newParams = { ...params, ...partial };
@@ -55,7 +56,19 @@ export function ControlPanel({ onParamsChange, fps = 0 }: Props) {
             fontFamily: 'monospace',
             fontSize: 13
         }}>
-            <h3 style={{ margin: '0 0 12px 0', fontSize: 14 }}>Shadow Controls</h3>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: 14 }}>
+                Shadow Controls
+                <span style={{
+                    marginLeft: 8,
+                    padding: '2px 6px',
+                    background: '#2b8a3e',
+                    borderRadius: 3,
+                    fontSize: 11
+                }}>
+                    {params.method}
+                </span>
+            </h3>
+
 
             <label style={{ display: 'block', marginBottom: 8 }}>
                 Method:
@@ -139,10 +152,10 @@ export function ControlPanel({ onParamsChange, fps = 0 }: Props) {
                                 borderRadius: 4
                             }}
                         >
+                            <option value="4">4</option>
                             <option value="8">8</option>
                             <option value="16">16</option>
                             <option value="32">32</option>
-                            <option value="64">64</option>
                         </select>
                     </label>
                 </>
@@ -216,6 +229,34 @@ export function ControlPanel({ onParamsChange, fps = 0 }: Props) {
                     </label>
                 </>
             )}
+
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #2b2f36' }}>
+                <label style={{ display: 'block', fontSize: 11, marginBottom: 4, opacity: 0.7 }}>
+                    Load Model (OBJ):
+                </label>
+                <input
+                    type="file"
+                    accept=".obj"
+                    onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+
+                        console.log('Загрузка модели пока не реализована');
+                        // TODO: добавить метод renderer.loadModel()
+                    }}
+                    style={{
+                        width: '100%',
+                        padding: 4,
+                        fontSize: 11,
+                        background: '#2b2f36',
+                        color: '#e6e6e6',
+                        border: '1px solid #3a3f48',
+                        borderRadius: 4,
+                        cursor: 'pointer'
+                    }}
+                />
+            </div>
+
 
             <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #2b2f36', fontSize: 11, opacity: 0.7 }}>
                 FPS: {fps}

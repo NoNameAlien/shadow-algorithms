@@ -61,13 +61,17 @@ fn findBlockerDistance(uv: vec2<f32>, zReceiver: f32, searchRadius: f32) -> vec2
   var blockerSum: f32 = 0.0;
   var numBlockers: f32 = 0.0;
   
-  for (var i = 0; i < sampleCount; i = i + 1) {
-    let offset = POISSON_64[i] * searchRadius * texelSize;
-    let shadowMapDepth = textureSampleLevel(shadowMap, shadowSamplerLinear, uv + offset, 0);
-    
-    if (shadowMapDepth < zReceiver) {
-      blockerSum += shadowMapDepth;
-      numBlockers += 1.0;
+  // ФИКСИРОВАННЫЙ цикл — максимум 8 сэмплов для blocker search
+  let maxSamples = min(sampleCount, 8);
+  for (var i = 0; i < 8; i = i + 1) {
+    if (i < maxSamples) {
+      let offset = POISSON_64[i] * searchRadius * texelSize;
+      let shadowMapDepth = textureSampleLevel(shadowMap, shadowSamplerLinear, uv + offset, 0);
+      
+      if (shadowMapDepth < zReceiver) {
+        blockerSum += shadowMapDepth;
+        numBlockers += 1.0;
+      }
     }
   }
   
@@ -79,24 +83,24 @@ fn findBlockerDistance(uv: vec2<f32>, zReceiver: f32, searchRadius: f32) -> vec2
   return vec2<f32>(avgBlockerDepth, numBlockers);
 }
 
-fn penumbraSize(zReceiver: f32, zBlocker: f32) -> f32 {
-  let lightSize = u.shadowParams.y;
-  return max((zReceiver - zBlocker) * lightSize / zBlocker, 0.0);
-}
-
 fn pcfFilter(uv: vec2<f32>, zReceiver: f32, filterRadius: f32) -> f32 {
   let texelSize = 1.0 / u.shadowParams.w;
   let depth = zReceiver - u.shadowParams.x;
   
   var shadow: f32 = 0.0;
-  let samples = 32;
   
-  for (var i = 0; i < samples; i = i + 1) {
+  for (var i = 0; i < 16; i = i + 1) {
     let offset = POISSON_64[i] * filterRadius * texelSize;
     shadow += textureSampleCompare(shadowMap, shadowSampler, uv + offset, depth);
   }
   
-  return shadow / f32(samples);
+  return shadow / 16.0;
+}
+
+
+fn penumbraSize(zReceiver: f32, zBlocker: f32) -> f32 {
+  let lightSize = u.shadowParams.y;
+  return max((zReceiver - zBlocker) * lightSize / zBlocker, 0.0);
 }
 
 fn shadowVisibilityPCSS(lightSpacePos: vec4<f32>) -> f32 {
@@ -136,11 +140,11 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   let L = normalize(u.lightDir.xyz);
   let lambert = max(dot(N, L), 0.0);
   
-  let visibility = shadowVisibilityPCSS(input.lightSpacePos);
+  let visibility = shadowVisibilityPCSS(input.lightSpacePos); // зависит от метода
   
-  let baseColor = vec3<f32>(0.6, 0.62, 0.65);
-  let ambient = 0.25;
+  let baseColor = vec3<f32>(0.7, 0.72, 0.75);
+  let ambient = 0.15; // Уменьшено с 0.25
   let diffuse = (1.0 - ambient) * lambert * visibility;
-  let finalColor = baseColor * min(ambient + diffuse * 0.8, 1.0);
+  let finalColor = baseColor * (ambient + diffuse); // Убран clamp для контраста
   return vec4<f32>(finalColor, 1.0);
 }

@@ -7,7 +7,7 @@ import depthWGSL from '../shaders/depth.wgsl?raw';
 import vsmMomentsWGSL from '../shaders/vsm_moments.wgsl?raw';
 import vsmBlurWGSL from '../shaders/vsm_blur.wgsl?raw';
 import vsmWGSL from '../shaders/vsm.wgsl?raw';
-
+import { ArcballController } from './ArcballController';
 
 type GPUCtx = {
   device: GPUDevice;
@@ -30,6 +30,15 @@ export class Renderer {
   private shadowPipeline!: GPURenderPipeline;
   private depthTex!: GPUTexture;
   private depthView!: GPUTextureView;
+  private arcball!: ArcballController; // ДОБАВЛЕНО
+  private lastFrameTime = performance.now();
+
+  // Пока закомментируем неиспользуемые (для будущего):
+  // private lightSphereVBO!: GPUBuffer;
+  // private gridVBO!: GPUBuffer;
+  // private gridPipeline!: GPURenderPipeline;
+  // private gridBindGroup!: GPUBindGroup;
+  // private colorView!: GPUTextureView;
 
   private shadowSize = 2048;
   private shadowTex!: GPUTexture;
@@ -58,7 +67,7 @@ export class Renderer {
 
   private viewProj = mat4.create();
   private model = mat4.create();
-  private lightDir = vec3.fromValues(-0.5, -1.0, -0.3);
+  private lightDir = vec3.fromValues(0.5, 1.0, 0.3);
   private lightViewProj = mat4.create();
 
   private rafId = 0;
@@ -87,6 +96,7 @@ export class Renderer {
 
   async init() {
     this.gpu = await initWebGPU(this.canvas);
+    this.arcball = new ArcballController(this.canvas);
     this.createDepth();
     this.createShadowResources();
     this.createVSMResources();
@@ -95,6 +105,7 @@ export class Renderer {
     this.createUniforms();
     this.updateViewProj();
     this.updateLightViewProj();
+
 
     window.addEventListener('resize', () => {
       this.gpu.configure();
@@ -268,13 +279,15 @@ export class Renderer {
   private createGeometry() {
     const { device } = this.gpu;
     const positions = new Float32Array([
+      // Куб 2x2x2 (от -1 до 1)
       -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1,
       -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1, -1,
       1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1,
       -1, -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1,
       -1, 1, 1, 1, 1, 1, 1, 1, -1, -1, 1, -1,
       -1, -1, 1, -1, -1, -1, 1, -1, -1, 1, -1, 1,
-      -4, -1.5, -4, 4, -1.5, -4, 4, -1.5, 4, -4, -1.5, 4,
+      // Плоскость МЕНЬШЕ (от -3 до 3, y=-1.2 ближе к кубу)
+      -2, -1.5, -2, 2, -1.5, -2, 2, -1.5, 2, -2, -1.5, 2,
     ]);
     const normals = new Float32Array([
       0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
@@ -283,8 +296,9 @@ export class Renderer {
       -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
       0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
       0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0,
-      0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
+      0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, // плоскость
     ]);
+    // indices не меняются
     const indices = new Uint16Array([
       0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11,
       12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23,
@@ -301,6 +315,7 @@ export class Renderer {
     this.ibo = device.createBuffer({ size: indices.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(this.ibo, 0, indices);
   }
+
 
   private createUniforms() {
     const { device } = this.gpu;
@@ -375,25 +390,77 @@ export class Renderer {
 
   }
 
-
   private updateViewProj() {
     const aspect = this.canvas.width / this.canvas.height;
     const proj = mat4.create();
     mat4.perspective(proj, (60 * Math.PI) / 180, aspect, 0.1, 100.0);
     const view = mat4.create();
-    mat4.lookAt(view, [3, 2.5, 4], [0, 0, 0], [0, 1, 0]);
+    const eye = vec3.fromValues(4, 3.5, 5);
+    mat4.lookAt(view, eye, [0, 0, 0], [0, 1, 0]);
     mat4.multiply(this.viewProj, proj, view);
   }
 
   private updateLightViewProj() {
     const lightPos = vec3.create();
-    vec3.scale(lightPos, this.lightDir, -10);
+    vec3.scale(lightPos, this.lightDir, 10);
     const lightView = mat4.create();
     mat4.lookAt(lightView, lightPos, [0, 0, 0], [0, 1, 0]);
     const lightProj = mat4.create();
     mat4.ortho(lightProj, -6, 6, -6, 6, 1, 20);
     mat4.multiply(this.lightViewProj, lightProj, lightView);
   }
+
+  // private createLightSphere() {
+  //   // Icosphere (20 треугольников) для визуализации света
+  //   const phi = (1 + Math.sqrt(5)) / 2;
+  //   const vertices = [
+  //     -1, phi, 0, 1, phi, 0, -1, -phi, 0, 1, -phi, 0,
+  //     0, -1, phi, 0, 1, phi, 0, -1, -phi, 0, 1, -phi,
+  //     phi, 0, -1, phi, 0, 1, -phi, 0, -1, -phi, 0, 1
+  //   ];
+
+  //   // Нормализация и масштаб 0.3
+  //   const scale = 0.3 / Math.sqrt(1 + phi * phi);
+  //   const spherePos = new Float32Array(vertices.map(v => v * scale));
+
+  //   this.lightSphereVBO = device.createBuffer({
+  //     size: spherePos.byteLength,
+  //     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+  //   });
+  //   device.queue.writeBuffer(this.lightSphereVBO, 0, spherePos);
+  // }
+
+  // private createGrid() {
+  //   // Большая плоскость для сетки (20×20)
+  //   const gridPos = new Float32Array([
+  //     -10, 0, -10, 10, 0, -10, 10, 0, 10,
+  //     -10, 0, -10, 10, 0, 10, -10, 0, 10
+  //   ]);
+
+  //   this.gridVBO = device.createBuffer({
+  //     size: gridPos.byteLength,
+  //     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+  //   });
+  //   device.queue.writeBuffer(this.gridVBO, 0, gridPos);
+  // }
+
+  // // В frame() рендерь сетку первой с alpha blending
+  // private renderGrid(encoder: GPUCommandEncoder) {
+  //   const pass = encoder.beginRenderPass({
+  //     colorAttachments: [{
+  //       view: this.colorView,
+  //       loadOp: 'load', // не очищаем
+  //       storeOp: 'store'
+  //     }]
+  //   });
+
+  //   pass.setPipeline(this.gridPipeline);
+  //   pass.setVertexBuffer(0, this.gridVBO);
+  //   pass.setBindGroup(0, this.gridBindGroup);
+  //   pass.draw(6); // 2 треугольника
+  //   pass.end();
+  // }
+
 
   start() {
     const loop = () => {
@@ -427,6 +494,9 @@ export class Renderer {
 
     this.frameCount++;
     const now = performance.now();
+    const deltaTime = (now - this.lastFrameTime) / 1000;
+    this.lastFrameTime = now;
+    this.model = this.arcball.update(deltaTime);
     if (now - this.lastFpsUpdate > 500) {
       this.currentFps = Math.round((this.frameCount * 1000) / (now - this.lastFpsUpdate));
       this.frameCount = 0;
@@ -570,8 +640,10 @@ export class Renderer {
     vsmMinVariance?: number;
     vsmLightBleedReduction?: number;
   }) {
-    const needsRebuild = params.shadowMapSize !== this.shadowSize || params.method !== this.shadowParams.method;
+    const methodChanged = params.method !== this.shadowParams.method;
+    const sizeChanged = params.shadowMapSize !== this.shadowSize;
 
+    // Обновляем параметры
     this.shadowParams = {
       ...this.shadowParams,
       ...params,
@@ -583,15 +655,17 @@ export class Renderer {
       vsmLightBleedReduction: params.vsmLightBleedReduction ?? this.shadowParams.vsmLightBleedReduction
     };
 
-    if (params.shadowMapSize !== this.shadowSize) {
+    // Пересоздаём ресурсы если изменился размер
+    if (sizeChanged) {
       this.shadowSize = params.shadowMapSize;
       this.createShadowResources();
       this.createVSMResources();
     }
 
-    if (needsRebuild) {
+    // ВАЖНО: Пересоздаём bind groups при смене метода или размера
+    if (methodChanged || sizeChanged) {
       this.recreateBindGroups();
+      console.log(`Switched to ${params.method}, bind groups recreated`);
     }
   }
-
 }
