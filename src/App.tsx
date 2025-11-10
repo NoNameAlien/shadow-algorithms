@@ -6,6 +6,7 @@ export default function App() {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<Renderer | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fps, setFps] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -13,6 +14,7 @@ export default function App() {
         if (!ref.current) return;
         const renderer = new Renderer(ref.current);
         await renderer.init();
+        renderer.setFpsCallback(setFps);
         renderer.start();
         rendererRef.current = renderer;
       } catch (e: any) {
@@ -37,7 +39,7 @@ export default function App() {
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#14161a', color: '#e6e6e6' }}>
       <canvas ref={ref} style={{ width: '100%', height: '100%', display: 'block' }} />
-      <ControlPanel onParamsChange={handleParamsChange} />
+      <ControlPanel onParamsChange={handleParamsChange} fps={fps} />
       {error && (
         <div style={{ position: 'absolute', top: 12, left: 12, padding: 8, background: '#2b2f36', borderRadius: 6, maxWidth: 420 }}>
           <b>Ошибка WebGPU:</b> {error}
