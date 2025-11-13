@@ -14,8 +14,8 @@ export class LightDragger {
         onLightChange: (newLightDir: vec3) => void
     ) {
         this.canvas = canvas;
-        this.viewProj = mat4.clone(viewProj); // ИСПРАВЛЕНО: клонируем
-        this.cameraPos = vec3.clone(cameraPos); // ИСПРАВЛЕНО: клонируем
+        this.viewProj = mat4.clone(viewProj);
+        this.cameraPos = vec3.clone(cameraPos);
         this.onLightChange = onLightChange;
         this.setupHandlers();
     }
@@ -51,7 +51,6 @@ export class LightDragger {
         const x = (2.0 * screenX) / this.canvas.width - 1.0;
         const y = 1.0 - (2.0 * screenY) / this.canvas.height;
 
-        // ИСПРАВЛЕНО: проверяем что invert успешна
         const invViewProj = mat4.create();
         const success = mat4.invert(invViewProj, this.viewProj);
 

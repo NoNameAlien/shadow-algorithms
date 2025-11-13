@@ -51,9 +51,6 @@ fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   let N = normalize(input.worldN);
   
-  // ДИАГНОСТИКА: покажем нормали как цвета (временно)
-  // return vec4<f32>(N * 0.5 + 0.5, 1.0); // раскомментируй эту строку для отладки
-  
   let L = normalize(u.lightDir.xyz);
   let lambert = max(dot(N, L), 0.0);
   

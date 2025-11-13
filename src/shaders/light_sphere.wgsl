@@ -18,8 +18,6 @@ struct Uniforms {
 @vertex
 fn vs_main(input: VSIn) -> VSOut {
   var out: VSOut;
-  // БЫЛО: let lightPos = u.lightDir.xyz * 10.0;
-  // СТАЛО: ближе к камере
   let lightPos = u.lightDir.xyz * 7.0;
   let worldPos = input.position + lightPos;
   out.clipPos = u.viewProj * vec4<f32>(worldPos, 1.0);

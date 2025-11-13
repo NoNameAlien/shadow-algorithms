@@ -63,7 +63,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   
   // Цвет сетки
   let gridColor = vec3<f32>(0.3, 0.35, 0.4);
-  let baseColor = vec3<f32>(0.15, 0.16, 0.18); // темнее для фона
+  let baseColor = vec3<f32>(0.15, 0.16, 0.18);
   
   // Смешиваем сетку с фоном
   let color = mix(baseColor, gridColor, gridAlpha);

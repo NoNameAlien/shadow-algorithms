@@ -36,7 +36,7 @@ export class Renderer {
   private shadowPipeline!: GPURenderPipeline;
   private depthTex!: GPUTexture;
   private depthView!: GPUTextureView;
-  private arcball!: ArcballController; // ДОБАВЛЕНО
+  private arcball!: ArcballController;
   private lastFrameTime = performance.now();
   private gridNBO!: GPUBuffer;
   private lightDragger!: LightDragger;
@@ -338,7 +338,7 @@ export class Renderer {
     if (this.vsmMomentsTex) this.vsmMomentsTex.destroy();
     this.vsmMomentsTex = device.createTexture({
       size: [this.shadowSize, this.shadowSize],
-      format: 'rgba16float', // ИЗМЕНЕНО с rg32float
+      format: 'rgba16float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT |
         GPUTextureUsage.TEXTURE_BINDING |
         GPUTextureUsage.STORAGE_BINDING
@@ -349,7 +349,7 @@ export class Renderer {
     if (this.vsmBlurTex) this.vsmBlurTex.destroy();
     this.vsmBlurTex = device.createTexture({
       size: [this.shadowSize, this.shadowSize],
-      format: 'rgba16float', // ИЗМЕНЕНО с rg32float
+      format: 'rgba16float',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING
     });
     this.vsmBlurView = this.vsmBlurTex.createView();
@@ -420,7 +420,6 @@ export class Renderer {
     });
     device.queue.writeBuffer(this.gridVBO, 0, gridPos);
 
-    // НОВОЕ: буфер нормалей для grid
     this.gridNBO = device.createBuffer({
       size: gridNorm.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
@@ -520,13 +519,11 @@ export class Renderer {
       ]
     });
 
-    // ИСПРАВЛЕНО: Grid bind groups из СВОЕГО pipeline layout
     this.gridBindGroup = device.createBindGroup({
       layout: this.gridPipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }]
     });
 
-    // ДОБАВЛЕНО: Grid group(1) bind group
     this.gridBindGroup1 = device.createBindGroup({
       layout: this.gridPipeline.getBindGroupLayout(1),
       entries: [
@@ -565,7 +562,6 @@ export class Renderer {
     const lightPos = vec3.create();
     vec3.scale(lightPos, this.lightDir, 10);
 
-    // ИСПРАВЛЕНО: динамический up вектор (избегаем singularity)
     let up = vec3.fromValues(0, 1, 0);
 
     // Если свет почти вертикален, используем другой up вектор
@@ -581,64 +577,10 @@ export class Renderer {
     mat4.lookAt(lightView, lightPos, [0, 0, 0], up);
 
     const lightProj = mat4.create();
-    // УВЕЛИЧЕНО: bounds до -8,8 чтобы покрыть весь grid 20x20
     mat4.ortho(lightProj, -8, 8, -8, 8, 1, 20);
 
     mat4.multiply(this.lightViewProj, lightProj, lightView);
   }
-
-
-  // private createLightSphere() {
-  //   // Icosphere (20 треугольников) для визуализации света
-  //   const phi = (1 + Math.sqrt(5)) / 2;
-  //   const vertices = [
-  //     -1, phi, 0, 1, phi, 0, -1, -phi, 0, 1, -phi, 0,
-  //     0, -1, phi, 0, 1, phi, 0, -1, -phi, 0, 1, -phi,
-  //     phi, 0, -1, phi, 0, 1, -phi, 0, -1, -phi, 0, 1
-  //   ];
-
-  //   // Нормализация и масштаб 0.3
-  //   const scale = 0.3 / Math.sqrt(1 + phi * phi);
-  //   const spherePos = new Float32Array(vertices.map(v => v * scale));
-
-  //   this.lightSphereVBO = device.createBuffer({
-  //     size: spherePos.byteLength,
-  //     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-  //   });
-  //   device.queue.writeBuffer(this.lightSphereVBO, 0, spherePos);
-  // }
-
-  // private createGrid() {
-  //   // Большая плоскость для сетки (20×20)
-  //   const gridPos = new Float32Array([
-  //     -10, 0, -10, 10, 0, -10, 10, 0, 10,
-  //     -10, 0, -10, 10, 0, 10, -10, 0, 10
-  //   ]);
-
-  //   this.gridVBO = device.createBuffer({
-  //     size: gridPos.byteLength,
-  //     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-  //   });
-  //   device.queue.writeBuffer(this.gridVBO, 0, gridPos);
-  // }
-
-  // // В frame() рендерь сетку первой с alpha blending
-  // private renderGrid(encoder: GPUCommandEncoder) {
-  //   const pass = encoder.beginRenderPass({
-  //     colorAttachments: [{
-  //       view: this.colorView,
-  //       loadOp: 'load', // не очищаем
-  //       storeOp: 'store'
-  //     }]
-  //   });
-
-  //   pass.setPipeline(this.gridPipeline);
-  //   pass.setVertexBuffer(0, this.gridVBO);
-  //   pass.setBindGroup(0, this.gridBindGroup);
-  //   pass.draw(6); // 2 треугольника
-  //   pass.end();
-  // }
-
 
   start() {
     const loop = () => {
@@ -686,7 +628,7 @@ export class Renderer {
     }
 
     this.cameraController.update(deltaTime);
-    this.updateViewProj(); // Пересчитываем view-projection
+    this.updateViewProj();
 
     this.model = this.arcball.update(deltaTime);
 
@@ -831,7 +773,7 @@ export class Renderer {
     const spherePass = encoder.beginRenderPass({
       colorAttachments: [{
         view: context.getCurrentTexture().createView(),
-        loadOp: 'load', // НЕ очищаем
+        loadOp: 'load',
         storeOp: 'store'
       }],
       depthStencilAttachment: {
@@ -883,7 +825,7 @@ export class Renderer {
       this.createVSMResources();
     }
 
-    // ВАЖНО: Пересоздаём bind groups при смене метода или размера
+    // Пересоздаём bind groups при смене метода или размера
     if (methodChanged || sizeChanged) {
       this.recreateBindGroups();
       console.log(`Switched to ${params.method}, bind groups recreated`);

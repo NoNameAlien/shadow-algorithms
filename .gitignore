@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+### Delete ###
+src/shaders/convert_shaders.sh
+src/shaders/shaders_text/
+###
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

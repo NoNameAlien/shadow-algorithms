@@ -23,7 +23,6 @@ export default function App() {
       }
     })();
 
-    // ДОБАВЛЕНО: отслеживаем pointer lock
     const checkPointerLock = setInterval(() => {
       if (rendererRef.current?.cameraController) {
         setIsPointerLocked(rendererRef.current.cameraController.isLocked());

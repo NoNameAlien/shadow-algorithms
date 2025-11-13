@@ -70,7 +70,7 @@ fn shadowVisibilityPCF(lightSpacePos: vec4<f32>) -> f32 {
   var shadow: f32 = 0.0;
   
   // Оптимизация: используем только нужное количество сэмплов
-  let maxSamples = min(sampleCount, 32); // Разрешаем до 32
+  let maxSamples = min(sampleCount, 32);
   
   // Разворачиваем цикл для скорости
   if (maxSamples <= 4) {
@@ -109,10 +109,10 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   let L = normalize(u.lightDir.xyz);
   let lambert = max(dot(N, L), 0.0);
   
-  let visibility = shadowVisibilityPCF(input.lightSpacePos); // зависит от метода
+  let visibility = shadowVisibilityPCF(input.lightSpacePos);
   
-  let baseColor = vec3<f32>(0.55, 0.57, 0.6); // Уменьшен для меньшей яркости
-  let ambient = 0.55; // Увеличен с 0.15 до 0.4 для видимости затененных областей
+  let baseColor = vec3<f32>(0.55, 0.57, 0.6); 
+  let ambient = 0.55;
   let diffuse = (1.0 - ambient) * lambert * visibility;
   let finalColor = baseColor * clamp(ambient + diffuse, 0.0, 1.0);
   return vec4<f32>(finalColor, 1.0);

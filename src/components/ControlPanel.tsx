@@ -31,8 +31,8 @@ export function ControlPanel({
         shadowMapSize: 2048,
         bias: 0.003,
         method: 'SM',
-        pcfRadius: 2.5, // Уменьшен для производительности
-        pcfSamples: 8,  // ИЗМЕНЕНО с 16 на 8 для 2x ускорения
+        pcfRadius: 2.5,
+        pcfSamples: 8,
         pcssLightSize: 0.08,
         pcssBlockerSearchSamples: 8,
         vsmMinVariance: 0.0001,

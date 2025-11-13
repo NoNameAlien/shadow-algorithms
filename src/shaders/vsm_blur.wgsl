@@ -1,5 +1,5 @@
 @group(0) @binding(0) var inputTex: texture_2d<f32>;
-@group(0) @binding(1) var outputTex: texture_storage_2d<rgba16float, write>; // ИЗМЕНЕНО с rg32float
+@group(0) @binding(1) var outputTex: texture_storage_2d<rgba16float, write>;
 
 // Простой 5x5 Gaussian kernel (приближённый)
 const KERNEL_SIZE: i32 = 5;
