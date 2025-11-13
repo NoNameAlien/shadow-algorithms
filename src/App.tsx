@@ -7,6 +7,7 @@ export default function App() {
   const rendererRef = useRef<Renderer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fps, setFps] = useState(0);
+  const [isPointerLocked, setIsPointerLocked] = useState(false); 
 
   useEffect(() => {
     (async () => {
@@ -22,7 +23,15 @@ export default function App() {
       }
     })();
 
+    // ДОБАВЛЕНО: отслеживаем pointer lock
+    const checkPointerLock = setInterval(() => {
+      if (rendererRef.current?.cameraController) {
+        setIsPointerLocked(rendererRef.current.cameraController.isLocked());
+      }
+    }, 100);
+
     return () => {
+      clearInterval(checkPointerLock);
       if (rendererRef.current) {
         rendererRef.current.destroy();
         rendererRef.current = null;
@@ -42,12 +51,20 @@ export default function App() {
     }
   };
 
+  const handleResetScene = () => {
+    if (rendererRef.current) {
+      rendererRef.current.resetScene();
+    }
+  };
+
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#14161a', color: '#e6e6e6' }}>
       <canvas ref={ref} style={{ width: '100%', height: '100%', display: 'block' }} />
       <ControlPanel
         onParamsChange={handleParamsChange}
         onLoadModel={handleLoadModel}
+        onResetScene={handleResetScene}
+        isPointerLocked={isPointerLocked}
         fps={fps}
       />
       {error && (

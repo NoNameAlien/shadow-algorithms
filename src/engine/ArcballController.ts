@@ -18,6 +18,9 @@ export class ArcballController {
 
     private setupHandlers() {
         this.canvas.addEventListener('mousedown', (e) => {
+            // НЕ работаем если зажат Ctrl (это для входа в FPS режим)
+            if (e.ctrlKey) return;
+
             this.isDragging = true;
             this.state = 'dragging';
             this.lastMousePos = { x: e.clientX, y: e.clientY };
@@ -46,6 +49,7 @@ export class ArcballController {
         });
     }
 
+
     update(deltaTime: number): mat4 {
         const now = performance.now();
 
@@ -68,5 +72,12 @@ export class ArcballController {
 
     getRotation(): quat {
         return quat.clone(this.rotation);
+    }
+
+    reset() {
+        this.rotation = quat.create();
+        this.state = 'animated';
+        this.pauseEndTime = 0;
+        console.log('Arcball rotation reset');
     }
 }

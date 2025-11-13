@@ -36,7 +36,7 @@ fn vs_main(input: VSIn) -> VSOut {
 
 fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
   let ndc = lightSpacePos.xyz / lightSpacePos.w;
-  let uv = ndc.xy * 0.5 + vec2<f32>(0.5);
+  let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5));
   let depth = ndc.z - u.shadowParams.x;
   
   let inBounds = ndc.x >= -1.0 && ndc.x <= 1.0 && 

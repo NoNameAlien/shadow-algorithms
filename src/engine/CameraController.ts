@@ -1,28 +1,48 @@
 import { vec3, mat4 } from 'gl-matrix';
 
+type ControlMode = 'orbit' | 'fps';
+
 export class CameraController {
     private canvas: HTMLCanvasElement;
-    private target = vec3.fromValues(0, 0, 0); // Точка на которую смотрим
-    private distance = 8.0; // Расстояние от target
-    private theta = Math.PI / 4; // Угол по горизонтали (45°)
-    private phi = Math.PI / 6; // Угол по вертикали (30°)
-    private height = 0; // Дополнительная высота камеры
 
+    // Orbit mode
+    private target = vec3.fromValues(0, 0, 0);
+    private distance = 8.0;
+    private theta = Math.PI / 4; // 45° горизонтально
+    private phi = Math.PI / 3; // 60° вертикально
+
+    // FPS mode
+    private position = vec3.fromValues(4, 3.5, 5);
+    private yaw = 0;
+    private pitch = 0;
+
+    private mode: ControlMode = 'orbit';
     private keys = new Set<string>();
-    private moveSpeed = 3.0; // единиц/секунду
-    private rotateSpeed = 1.5; // радиан/секунду
-    private zoomSpeed = 5.0;
+    private moveSpeed = 5.0;
+    private rotateSpeed = 1.5;
+    private mouseSensitivity = 0.002;
+    private isPointerLocked = false;
 
     constructor(canvas: HTMLCanvasElement) {
         this.canvas = canvas;
         this.setupHandlers();
+        this.calculateInitialPosition();
+    }
+
+    private calculateInitialPosition() {
+        // Вычисляем позицию из orbit параметров
+        this.position = vec3.fromValues(
+            this.target[0] + this.distance * Math.sin(this.phi) * Math.cos(this.theta),
+            this.target[1] + this.distance * Math.cos(this.phi),
+            this.target[2] + this.distance * Math.sin(this.phi) * Math.sin(this.theta)
+        );
     }
 
     private setupHandlers() {
         // Клавиатура
         window.addEventListener('keydown', (e) => {
             this.keys.add(e.key.toLowerCase());
-            this.keys.add(e.code); // Для стрелок
+            this.keys.add(e.code);
         });
 
         window.addEventListener('keyup', (e) => {
@@ -30,16 +50,62 @@ export class CameraController {
             this.keys.delete(e.code);
         });
 
-        // Колесико мыши для zoom
+        // Ctrl+Click для входа в FPS режим
+        this.canvas.addEventListener('click', (e) => {
+            if (e.ctrlKey && !this.isPointerLocked) {
+                this.mode = 'fps';
+                this.canvas.requestPointerLock();
+            }
+        });
+
+        // Pointer lock состояние
+        document.addEventListener('pointerlockchange', () => {
+            this.isPointerLocked = document.pointerLockElement === this.canvas;
+            if (!this.isPointerLocked) {
+                this.mode = 'orbit'; // Выход из FPS режима
+                console.log('Exited FPS mode, returned to orbit');
+            } else {
+                console.log('Entered FPS mode');
+            }
+        });
+
+        // Движение мыши
+        document.addEventListener('mousemove', (e) => {
+            if (this.mode === 'fps' && this.isPointerLocked) {
+                // FPS режим — вращение взгляда
+                this.yaw -= e.movementX * this.mouseSensitivity;
+                this.pitch -= e.movementY * this.mouseSensitivity;
+                this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
+            }
+        });
+
+        // Колесико мыши — zoom в orbit режиме
         this.canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            this.distance += e.deltaY * 0.01;
-            this.distance = Math.max(2, Math.min(30, this.distance)); // Ограничиваем 2-30
+            if (this.mode === 'orbit') {
+                e.preventDefault();
+                this.distance += e.deltaY * 0.01;
+                this.distance = Math.max(2, Math.min(30, this.distance));
+            }
         }, { passive: false });
+
+        // ESC для выхода
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.isPointerLocked) {
+                document.exitPointerLock();
+            }
+        });
     }
 
     update(deltaTime: number) {
-        // WASD или стрелки - orbit вокруг центра
+        if (this.mode === 'orbit') {
+            this.updateOrbit(deltaTime);
+        } else {
+            this.updateFPS(deltaTime);
+        }
+    }
+
+    private updateOrbit(deltaTime: number) {
+        // WASD/стрелки вращают камеру вокруг центра
         if (this.keys.has('a') || this.keys.has('arrowleft')) {
             this.theta += this.rotateSpeed * deltaTime;
         }
@@ -53,58 +119,95 @@ export class CameraController {
             this.phi = Math.min(Math.PI - 0.1, this.phi + this.rotateSpeed * deltaTime);
         }
 
-        // Пробел - подъём вверх
+        // Вычисляем позицию из orbit параметров
+        this.position = vec3.fromValues(
+            this.target[0] + this.distance * Math.sin(this.phi) * Math.cos(this.theta),
+            this.target[1] + this.distance * Math.cos(this.phi),
+            this.target[2] + this.distance * Math.sin(this.phi) * Math.sin(this.theta)
+        );
+    }
+
+    private updateFPS(deltaTime: number) {
+        // Направления
+        const forward = vec3.fromValues(
+            Math.sin(this.yaw),
+            0,
+            Math.cos(this.yaw)
+        );
+        const right = vec3.fromValues(
+            Math.cos(this.yaw),
+            0,
+            -Math.sin(this.yaw)
+        );
+
+        // WASD движение
+        if (this.keys.has('w')) {
+            vec3.scaleAndAdd(this.position, this.position, forward, this.moveSpeed * deltaTime);
+        }
+        if (this.keys.has('s')) {
+            vec3.scaleAndAdd(this.position, this.position, forward, -this.moveSpeed * deltaTime);
+        }
+        if (this.keys.has('a')) {
+            vec3.scaleAndAdd(this.position, this.position, right, -this.moveSpeed * deltaTime);
+        }
+        if (this.keys.has('d')) {
+            vec3.scaleAndAdd(this.position, this.position, right, this.moveSpeed * deltaTime);
+        }
+
+        // Space/Shift вертикаль
         if (this.keys.has(' ') || this.keys.has('space')) {
-            this.height += this.moveSpeed * deltaTime;
+            this.position[1] += this.moveSpeed * deltaTime;
         }
-
-        // Shift - спуск вниз
         if (this.keys.has('shift')) {
-            this.height -= this.moveSpeed * deltaTime;
+            this.position[1] -= this.moveSpeed * deltaTime;
         }
-
-        // Q/E - zoom (альтернатива колесику)
-        if (this.keys.has('q')) {
-            this.distance = Math.max(2, this.distance - this.zoomSpeed * deltaTime);
-        }
-        if (this.keys.has('e')) {
-            this.distance = Math.min(30, this.distance + this.zoomSpeed * deltaTime);
-        }
-
-        // Ограничиваем высоту
-        this.height = Math.max(-10, Math.min(20, this.height));
     }
 
     getCameraPosition(): vec3 {
-        // Сферические координаты в декартовы
-        const x = this.target[0] + this.distance * Math.sin(this.phi) * Math.cos(this.theta);
-        const y = this.target[1] + this.distance * Math.cos(this.phi) + this.height;
-        const z = this.target[2] + this.distance * Math.sin(this.phi) * Math.sin(this.theta);
-
-        return vec3.fromValues(x, y, z);
+        return vec3.clone(this.position);
     }
 
     getTarget(): vec3 {
-        // Target с учётом высоты
-        return vec3.fromValues(
-            this.target[0],
-            this.target[1] + this.height * 0.5, // Следим за сдвигом вверх
-            this.target[2]
-        );
+        if (this.mode === 'orbit') {
+            return vec3.clone(this.target);
+        } else {
+            // FPS — смотрим в направлении yaw/pitch
+            return vec3.fromValues(
+                this.position[0] + Math.sin(this.yaw) * Math.cos(this.pitch),
+                this.position[1] + Math.sin(this.pitch),
+                this.position[2] + Math.cos(this.yaw) * Math.cos(this.pitch)
+            );
+        }
     }
 
     getViewMatrix(): mat4 {
         const view = mat4.create();
-        const eye = this.getCameraPosition();
         const target = this.getTarget();
-        mat4.lookAt(view, eye, target, [0, 1, 0]);
+        mat4.lookAt(view, this.position, target, [0, 1, 0]);
         return view;
     }
 
     reset() {
+        this.mode = 'orbit';
         this.distance = 8.0;
         this.theta = Math.PI / 4;
         this.phi = Math.PI / 6;
-        this.height = 0;
+        this.calculateInitialPosition();
+        this.yaw = 0;
+        this.pitch = 0;
+
+        if (this.isPointerLocked) {
+            document.exitPointerLock();
+        }
+
+        console.log('Camera reset to orbit mode');
+    }
+
+    isLocked(): boolean {
+        return this.isPointerLocked;
+    }
+
+    getMode(): ControlMode {
+        return this.mode;
     }
 }

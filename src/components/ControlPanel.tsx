@@ -3,7 +3,9 @@ import { useState } from 'react';
 type Props = {
     onParamsChange: (params: ShadowParams) => void;
     onLoadModel: (file: File) => void;
+    onResetScene?: () => void;
     fps?: number;
+    isPointerLocked?: boolean;
 };
 
 export type ShadowParams = {
@@ -18,7 +20,13 @@ export type ShadowParams = {
     vsmLightBleedReduction?: number;
 };
 
-export function ControlPanel({ onParamsChange, onLoadModel, fps = 0 }: Props) {
+export function ControlPanel({
+    onParamsChange,
+    onLoadModel,
+    onResetScene,
+    fps = 0,
+    isPointerLocked = false
+}: Props) {
     const [params, setParams] = useState<ShadowParams>({
         shadowMapSize: 2048,
         bias: 0.003,
@@ -232,6 +240,24 @@ export function ControlPanel({ onParamsChange, onLoadModel, fps = 0 }: Props) {
                 </>
             )}
 
+            <button
+                onClick={onResetScene}
+                style={{
+                    width: '100%',
+                    padding: 8,
+                    marginTop: 12,
+                    background: '#c92a2a',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    fontWeight: 'bold'
+                }}
+            >
+                🔄 Reset Scene
+            </button>
+
             <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #2b2f36' }}>
                 <label style={{ display: 'block', fontSize: 11, marginBottom: 4, opacity: 0.7 }}>
                     Load Model (OBJ):
@@ -268,11 +294,33 @@ export function ControlPanel({ onParamsChange, onLoadModel, fps = 0 }: Props) {
                 opacity: 0.6,
                 lineHeight: 1.6
             }}>
-                <div>💡 <strong>Shift+Drag</strong> - move light</div>
-                <div>🎮 <strong>WASD/Arrows</strong> - orbit camera</div>
-                <div>⬆️ <strong>Space</strong> - fly up</div>
-                <div>⬇️ <strong>Shift</strong> - fly down</div>
-                <div>🔍 <strong>Q/E</strong> or <strong>Mouse Wheel</strong> - zoom</div>
+                {isPointerLocked ? (
+                    <>
+                        <div style={{ color: '#40c057', fontWeight: 'bold', marginBottom: 6 }}>
+                            🎯 FPS MODE (ESC to exit)
+                        </div>
+                        <div>🎮 <strong>WASD</strong> - move camera</div>
+                        <div>⬆️ <strong>Space</strong> - fly up</div>
+                        <div>⬇️ <strong>Shift</strong> - fly down</div>
+                        <div>🖱️ <strong>Mouse</strong> - look around</div>
+                        <div style={{ marginTop: 6, color: '#ffd43b' }}>
+                            💡 Click objects to drag them
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div style={{ fontWeight: 'bold', marginBottom: 6 }}>
+                            🎮 ORBIT MODE (default)
+                        </div>
+                        <div>🖱️ <strong>Drag object</strong> - rotate object</div>
+                        <div>🎯 <strong>Shift+Drag</strong> - move light</div>
+                        <div>⬆️⬇️ <strong>WASD/Arrows</strong> - rotate view</div>
+                        <div>🔍 <strong>Mouse Wheel</strong> - zoom</div>
+                        <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #2b2f36' }}>
+                            💡 <strong>Ctrl+Click</strong> to enter FPS mode
+                        </div>
+                    </>
+                )}
             </div>
 
             <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #2b2f36', fontSize: 11, opacity: 0.7 }}>

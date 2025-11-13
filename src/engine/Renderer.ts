@@ -13,6 +13,7 @@ import gridSolidWGSL from '../shaders/grid_solid.wgsl?raw';
 import lightSphereWGSL from '../shaders/light_sphere.wgsl?raw';
 import { SphereGenerator } from '../geometry/SphereGenerator';
 import { LightDragger } from './LightDragger';
+import { CameraController } from './CameraController';
 
 type GPUCtx = {
   device: GPUDevice;
@@ -39,6 +40,7 @@ export class Renderer {
   private lastFrameTime = performance.now();
   private gridNBO!: GPUBuffer;
   private lightDragger!: LightDragger;
+  public cameraController!: CameraController;
 
   private shadowSize = 2048;
   private shadowTex!: GPUTexture;
@@ -107,6 +109,7 @@ export class Renderer {
   async init() {
     this.gpu = await initWebGPU(this.canvas);
     this.arcball = new ArcballController(this.canvas);
+    this.cameraController = new CameraController(this.canvas);
 
     this.createDepth();
     this.createShadowResources();
@@ -119,8 +122,7 @@ export class Renderer {
     this.updateViewProj();
     this.updateLightViewProj();
 
-    // ДОБАВЬ: Light dragger
-    const cameraPos = vec3.fromValues(4, 3.5, 5);
+    const cameraPos = this.cameraController.getCameraPosition();
     this.lightDragger = new LightDragger(
       this.canvas,
       this.viewProj,
@@ -430,7 +432,7 @@ export class Renderer {
     const { device } = this.gpu;
 
     // Генерируем icosphere радиус 0.3, 1 subdivision
-    const sphere = SphereGenerator.createIcosphere(0.8, 1);
+    const sphere = SphereGenerator.createIcosphere(0.4, 1);
     this.lightSphereIndexCount = sphere.indices.length;
 
     this.lightSphereVBO = device.createBuffer({
@@ -546,26 +548,45 @@ export class Renderer {
     const aspect = this.canvas.width / this.canvas.height;
     const proj = mat4.create();
     mat4.perspective(proj, (60 * Math.PI) / 180, aspect, 0.1, 100.0);
-    const view = mat4.create();
-    const eye = vec3.fromValues(4, 3.5, 5);
-    mat4.lookAt(view, eye, [0, 0, 0], [0, 1, 0]);
+
+    const view = this.cameraController.getViewMatrix();
     mat4.multiply(this.viewProj, proj, view);
 
+    // Обновляем lightDragger
     if (this.lightDragger) {
-      this.lightDragger.updateCamera(this.viewProj, eye);
+      const cameraPos = this.cameraController.getCameraPosition();
+      this.lightDragger.updateCamera(this.viewProj, cameraPos);
     }
   }
+
 
 
   private updateLightViewProj() {
     const lightPos = vec3.create();
     vec3.scale(lightPos, this.lightDir, 10);
+
+    // ИСПРАВЛЕНО: динамический up вектор (избегаем singularity)
+    let up = vec3.fromValues(0, 1, 0);
+
+    // Если свет почти вертикален, используем другой up вектор
+    const lightDirNorm = vec3.normalize(vec3.create(), this.lightDir);
+    const dotUp = Math.abs(vec3.dot(lightDirNorm, [0, 1, 0]));
+
+    if (dotUp > 0.99) {
+      // Свет почти вертикален → используем Z как up
+      up = vec3.fromValues(0, 0, 1);
+    }
+
     const lightView = mat4.create();
-    mat4.lookAt(lightView, lightPos, [0, 0, 0], [0, 1, 0]);
+    mat4.lookAt(lightView, lightPos, [0, 0, 0], up);
+
     const lightProj = mat4.create();
-    mat4.ortho(lightProj, -6, 6, -6, 6, 1, 20);
+    // УВЕЛИЧЕНО: bounds до -8,8 чтобы покрыть весь grid 20x20
+    mat4.ortho(lightProj, -8, 8, -8, 8, 1, 20);
+
     mat4.multiply(this.lightViewProj, lightProj, lightView);
   }
+
 
   // private createLightSphere() {
   //   // Icosphere (20 треугольников) для визуализации света
@@ -664,6 +685,9 @@ export class Renderer {
       }
     }
 
+    this.cameraController.update(deltaTime);
+    this.updateViewProj(); // Пересчитываем view-projection
+
     this.model = this.arcball.update(deltaTime);
 
     const lightDirNorm = vec3.create();
@@ -749,11 +773,6 @@ export class Renderer {
       shadowPass.setIndexBuffer(this.ibo, 'uint16');
       shadowPass.setBindGroup(0, this.bindGroup0Shadow);
       shadowPass.drawIndexed(this.indexCount);
-
-      // Grid (non-indexed) - НЕ устанавливаем index buffer!
-      shadowPass.setVertexBuffer(0, this.gridVBO);
-      shadowPass.setBindGroup(0, this.bindGroup0Shadow);
-      shadowPass.draw(6);
 
       shadowPass.end();
     }
@@ -871,6 +890,16 @@ export class Renderer {
     }
   }
 
+  resetScene() {
+    this.cameraController.reset();
+    this.updateViewProj();
+    this.createGeometry();
+    this.lightDir = vec3.fromValues(0.5, 1.0, 0.3);
+    this.updateLightViewProj();
+    this.arcball.reset();
+    console.log('✓ Scene reset to defaults');
+  }
+
   async loadModel(file: File) {
     const loader = new ModelLoader();
 
@@ -879,34 +908,7 @@ export class Renderer {
       const model = await loader.loadOBJ(url);
       URL.revokeObjectURL(url);
 
-      // Заменяем текущую геометрию
       const { device } = this.gpu;
-
-      // Добавляем плоскость к загруженной модели
-      const planeStart = model.positions.length / 3;
-      const planePos = new Float32Array([
-        -4, -2.5, -4, 4, -2.5, -4, 4, -2.5, 4, -4, -2.5, 4  // y=-2.5
-      ]);
-      const planeNorm = new Float32Array([
-        0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0
-      ]);
-      const planeIdx = new Uint16Array([
-        planeStart, planeStart + 1, planeStart + 2,
-        planeStart, planeStart + 2, planeStart + 3
-      ]);
-
-      // Объединяем модель + плоскость
-      const finalPos = new Float32Array(model.positions.length + planePos.length);
-      finalPos.set(model.positions);
-      finalPos.set(planePos, model.positions.length);
-
-      const finalNorm = new Float32Array(model.normals.length + planeNorm.length);
-      finalNorm.set(model.normals);
-      finalNorm.set(planeNorm, model.normals.length);
-
-      const finalIdx = new Uint16Array(model.indices.length + planeIdx.length);
-      finalIdx.set(model.indices);
-      finalIdx.set(planeIdx, model.indices.length);
 
       // Обновляем буферы
       if (this.vbo) this.vbo.destroy();
@@ -914,24 +916,24 @@ export class Renderer {
       if (this.ibo) this.ibo.destroy();
 
       this.vbo = device.createBuffer({
-        size: finalPos.byteLength,
+        size: model.positions.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
       });
-      device.queue.writeBuffer(this.vbo, 0, finalPos);
+      device.queue.writeBuffer(this.vbo, 0, model.positions.buffer);
 
       this.nbo = device.createBuffer({
-        size: finalNorm.byteLength,
+        size: model.normals.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
       });
-      device.queue.writeBuffer(this.nbo, 0, finalNorm);
+      device.queue.writeBuffer(this.nbo, 0, model.normals.buffer);
 
       this.ibo = device.createBuffer({
-        size: finalIdx.byteLength,
+        size: model.indices.byteLength,
         usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
       });
-      device.queue.writeBuffer(this.ibo, 0, finalIdx);
+      device.queue.writeBuffer(this.ibo, 0, model.indices.buffer);
 
-      this.indexCount = finalIdx.length;
+      this.indexCount = model.indices.length;
 
       console.log(`✓ Loaded OBJ: ${model.positions.length / 3} vertices, ${model.indices.length / 3} triangles`);
     } catch (e) {
@@ -939,4 +941,5 @@ export class Renderer {
       alert(`Ошибка загрузки модели: ${e}`);
     }
   }
+
 }
