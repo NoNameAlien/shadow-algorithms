@@ -50,15 +50,19 @@ fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   let N = normalize(input.worldN);
+  
+  // ДИАГНОСТИКА: покажем нормали как цвета (временно)
+  // return vec4<f32>(N * 0.5 + 0.5, 1.0); // раскомментируй эту строку для отладки
+  
   let L = normalize(u.lightDir.xyz);
   let lambert = max(dot(N, L), 0.0);
   
-  let visibility = shadowVisibility(input.lightSpacePos); // зависит от метода
+  let visibility = shadowVisibility(input.lightSpacePos);
   
-  let baseColor = vec3<f32>(0.7, 0.72, 0.75);
-  let ambient = 0.15; // Уменьшено с 0.25
+  let baseColor = vec3<f32>(0.55, 0.57, 0.6);
+  let ambient = 0.55;
   let diffuse = (1.0 - ambient) * lambert * visibility;
-  let finalColor = baseColor * (ambient + diffuse); // Убран clamp для контраста
+  let finalColor = baseColor * clamp(ambient + diffuse, 0.0, 1.0);
   return vec4<f32>(finalColor, 1.0);
 }
 

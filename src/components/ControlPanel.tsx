@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 type Props = {
     onParamsChange: (params: ShadowParams) => void;
+    onLoadModel: (file: File) => void;
     fps?: number;
 };
 
@@ -17,7 +18,7 @@ export type ShadowParams = {
     vsmLightBleedReduction?: number;
 };
 
-export function ControlPanel({ onParamsChange, fps = 0 }: Props) {
+export function ControlPanel({ onParamsChange, onLoadModel, fps = 0 }: Props) {
     const [params, setParams] = useState<ShadowParams>({
         shadowMapSize: 2048,
         bias: 0.003,
@@ -105,6 +106,7 @@ export function ControlPanel({ onParamsChange, fps = 0 }: Props) {
                     style={{ width: '100%', display: 'block', marginTop: 4 }}
                 />
             </label>
+
 
             {!isVSM && (
                 <label style={{ display: 'block', marginBottom: 8 }}>
@@ -237,12 +239,11 @@ export function ControlPanel({ onParamsChange, fps = 0 }: Props) {
                 <input
                     type="file"
                     accept=".obj"
-                    onChange={async (e) => {
+                    onChange={(e) => {
                         const file = e.target.files?.[0];
-                        if (!file) return;
-
-                        console.log('Загрузка модели пока не реализована');
-                        // TODO: добавить метод renderer.loadModel()
+                        if (file) {
+                            onLoadModel(file);
+                        }
                     }}
                     style={{
                         width: '100%',
@@ -258,9 +259,26 @@ export function ControlPanel({ onParamsChange, fps = 0 }: Props) {
             </div>
 
 
+
+            <div style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTop: '1px solid #2b2f36',
+                fontSize: 11,
+                opacity: 0.6,
+                lineHeight: 1.6
+            }}>
+                <div>💡 <strong>Shift+Drag</strong> - move light</div>
+                <div>🎮 <strong>WASD/Arrows</strong> - orbit camera</div>
+                <div>⬆️ <strong>Space</strong> - fly up</div>
+                <div>⬇️ <strong>Shift</strong> - fly down</div>
+                <div>🔍 <strong>Q/E</strong> or <strong>Mouse Wheel</strong> - zoom</div>
+            </div>
+
             <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #2b2f36', fontSize: 11, opacity: 0.7 }}>
                 FPS: {fps}
             </div>
+
         </div>
     );
 }

@@ -8,6 +8,11 @@ import vsmMomentsWGSL from '../shaders/vsm_moments.wgsl?raw';
 import vsmBlurWGSL from '../shaders/vsm_blur.wgsl?raw';
 import vsmWGSL from '../shaders/vsm.wgsl?raw';
 import { ArcballController } from './ArcballController';
+import { ModelLoader } from '../loaders/ModelLoader';
+import gridSolidWGSL from '../shaders/grid_solid.wgsl?raw';
+import lightSphereWGSL from '../shaders/light_sphere.wgsl?raw';
+import { SphereGenerator } from '../geometry/SphereGenerator';
+import { LightDragger } from './LightDragger';
 
 type GPUCtx = {
   device: GPUDevice;
@@ -32,13 +37,8 @@ export class Renderer {
   private depthView!: GPUTextureView;
   private arcball!: ArcballController; // ДОБАВЛЕНО
   private lastFrameTime = performance.now();
-
-  // Пока закомментируем неиспользуемые (для будущего):
-  // private lightSphereVBO!: GPUBuffer;
-  // private gridVBO!: GPUBuffer;
-  // private gridPipeline!: GPURenderPipeline;
-  // private gridBindGroup!: GPUBindGroup;
-  // private colorView!: GPUTextureView;
+  private gridNBO!: GPUBuffer;
+  private lightDragger!: LightDragger;
 
   private shadowSize = 2048;
   private shadowTex!: GPUTexture;
@@ -53,6 +53,12 @@ export class Renderer {
   private vsmBlurView!: GPUTextureView;
   private vsmSampler!: GPUSampler;
 
+  private lightSpherePipeline!: GPURenderPipeline;
+  private lightSphereVBO!: GPUBuffer;
+  private lightSphereIBO!: GPUBuffer;
+  private lightSphereIndexCount = 0;
+  private lightSphereBindGroup!: GPUBindGroup;
+
   private vbo!: GPUBuffer;
   private nbo!: GPUBuffer;
   private ibo!: GPUBuffer;
@@ -65,13 +71,17 @@ export class Renderer {
   private bindGroup1Main!: GPUBindGroup;
   private vsmBlurBindGroup0!: GPUBindGroup; // input -> output
 
+  private gridPipeline!: GPURenderPipeline;
+  private gridVBO!: GPUBuffer;
+  private gridBindGroup!: GPUBindGroup;
+  private gridBindGroup1!: GPUBindGroup;
+
   private viewProj = mat4.create();
   private model = mat4.create();
   private lightDir = vec3.fromValues(0.5, 1.0, 0.3);
   private lightViewProj = mat4.create();
 
   private rafId = 0;
-  private timeStart = performance.now();
 
   private frameCount = 0;
   private lastFpsUpdate = performance.now();
@@ -97,15 +107,30 @@ export class Renderer {
   async init() {
     this.gpu = await initWebGPU(this.canvas);
     this.arcball = new ArcballController(this.canvas);
+
     this.createDepth();
     this.createShadowResources();
     this.createVSMResources();
     await this.createPipelines();
     this.createGeometry();
+    this.createGrid();
+    this.createLightSphere();
     this.createUniforms();
     this.updateViewProj();
     this.updateLightViewProj();
 
+    // ДОБАВЬ: Light dragger
+    const cameraPos = vec3.fromValues(4, 3.5, 5);
+    this.lightDragger = new LightDragger(
+      this.canvas,
+      this.viewProj,
+      cameraPos,
+      (newLightDir) => {
+        // Callback: обновляем направление света
+        vec3.copy(this.lightDir, newLightDir);
+        this.updateLightViewProj(); // Пересчитываем shadow map
+      }
+    );
 
     window.addEventListener('resize', () => {
       this.gpu.configure();
@@ -114,6 +139,7 @@ export class Renderer {
       this.updateViewProj();
     });
   }
+
 
 
   setFpsCallback(callback: (fps: number) => void) {
@@ -241,6 +267,66 @@ export class Renderer {
       compute: { module: blurModule, entryPoint: 'cs_horizontal' }
     });
     console.log('✓ Blur pipelines created');
+
+    // Grid pipeline с нормалями и shadow mapping
+    const gridSolidModule = device.createShaderModule({ code: gridSolidWGSL });
+    const gridBuffers: GPUVertexBufferLayout[] = [
+      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }] },
+      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 1, format: 'float32x3', offset: 0 }] }
+    ];
+    this.gridPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: gridSolidModule, entryPoint: 'vs_main', buffers: gridBuffers },
+      fragment: {
+        module: gridSolidModule,
+        entryPoint: 'fs_main',
+        targets: [{
+          format,
+          blend: { // alpha blending для затухания
+            color: {
+              srcFactor: 'src-alpha',
+              dstFactor: 'one-minus-src-alpha',
+              operation: 'add'
+            },
+            alpha: {
+              srcFactor: 'one',
+              dstFactor: 'one-minus-src-alpha',
+              operation: 'add'
+            }
+          }
+        }]
+      },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: {
+        format: 'depth24plus',
+        depthWriteEnabled: true,
+        depthCompare: 'less'
+      }
+    });
+    console.log('✓ Grid pipeline created');
+
+    // Light sphere pipeline (unlit)
+    const lightSphereModule = device.createShaderModule({ code: lightSphereWGSL });
+    const spherePosLayout: GPUVertexBufferLayout = {
+      arrayStride: 3 * 4,
+      attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }]
+    };
+    this.lightSpherePipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: lightSphereModule, entryPoint: 'vs_main', buffers: [spherePosLayout] },
+      fragment: {
+        module: lightSphereModule,
+        entryPoint: 'fs_main',
+        targets: [{ format }]
+      },
+      primitive: { topology: 'triangle-list', cullMode: 'back' },
+      depthStencil: {
+        format: 'depth24plus',
+        depthWriteEnabled: true,
+        depthCompare: 'less'
+      }
+    });
+    console.log('✓ Light sphere pipeline created');
   }
 
   private createVSMResources() {
@@ -286,8 +372,6 @@ export class Renderer {
       -1, -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1,
       -1, 1, 1, 1, 1, 1, 1, 1, -1, -1, 1, -1,
       -1, -1, 1, -1, -1, -1, 1, -1, -1, 1, -1, 1,
-      // Плоскость МЕНЬШЕ (от -3 до 3, y=-1.2 ближе к кубу)
-      -2, -1.5, -2, 2, -1.5, -2, 2, -1.5, 2, -2, -1.5, 2,
     ]);
     const normals = new Float32Array([
       0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
@@ -296,13 +380,11 @@ export class Renderer {
       -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
       0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
       0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0,
-      0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, // плоскость
     ]);
     // indices не меняются
     const indices = new Uint16Array([
       0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11,
       12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23,
-      24, 25, 26, 24, 26, 27,
     ]);
     this.indexCount = indices.length;
 
@@ -314,6 +396,56 @@ export class Renderer {
 
     this.ibo = device.createBuffer({ size: indices.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(this.ibo, 0, indices);
+  }
+
+  private createGrid() {
+    const { device } = this.gpu;
+
+    // Большая плоскость 20×20 с нормалями (для теней)
+    const gridPos = new Float32Array([
+      -10, -2.5, -10, 10, -2.5, -10, 10, -2.5, 10,
+      -10, -2.5, -10, 10, -2.5, 10, -10, -2.5, 10
+    ]);
+
+    const gridNorm = new Float32Array([
+      0, 1, 0, 0, 1, 0, 0, 1, 0,
+      0, 1, 0, 0, 1, 0, 0, 1, 0
+    ]);
+
+    this.gridVBO = device.createBuffer({
+      size: gridPos.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(this.gridVBO, 0, gridPos);
+
+    // НОВОЕ: буфер нормалей для grid
+    this.gridNBO = device.createBuffer({
+      size: gridNorm.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(this.gridNBO, 0, gridNorm);
+  }
+
+  private createLightSphere() {
+    const { device } = this.gpu;
+
+    // Генерируем icosphere радиус 0.3, 1 subdivision
+    const sphere = SphereGenerator.createIcosphere(0.8, 1);
+    this.lightSphereIndexCount = sphere.indices.length;
+
+    this.lightSphereVBO = device.createBuffer({
+      size: sphere.positions.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(this.lightSphereVBO, 0, sphere.positions.buffer);
+
+    this.lightSphereIBO = device.createBuffer({
+      size: sphere.indices.byteLength,
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(this.lightSphereIBO, 0, sphere.indices.buffer);
+
+    console.log('✓ Light sphere geometry created');
   }
 
 
@@ -341,7 +473,6 @@ export class Renderer {
       entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }]
     });
 
-    // НОВОЕ: bind group для VSM moments pipeline
     this.bindGroup0VSMMoments = device.createBindGroup({
       layout: this.vsmMomentsPipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }]
@@ -379,7 +510,6 @@ export class Renderer {
       });
     }
 
-    // Blur bind groups для compute
     this.vsmBlurBindGroup0 = device.createBindGroup({
       layout: this.blurHorizontalPipeline.getBindGroupLayout(0),
       entries: [
@@ -388,7 +518,29 @@ export class Renderer {
       ]
     });
 
+    // ИСПРАВЛЕНО: Grid bind groups из СВОЕГО pipeline layout
+    this.gridBindGroup = device.createBindGroup({
+      layout: this.gridPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }]
+    });
+
+    // ДОБАВЛЕНО: Grid group(1) bind group
+    this.gridBindGroup1 = device.createBindGroup({
+      layout: this.gridPipeline.getBindGroupLayout(1),
+      entries: [
+        { binding: 0, resource: this.shadowView },
+        { binding: 1, resource: this.shadowSampler }
+      ]
+    });
+
+    // Light sphere bind group
+    this.lightSphereBindGroup = device.createBindGroup({
+      layout: this.lightSpherePipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }]
+    });
+
   }
+
 
   private updateViewProj() {
     const aspect = this.canvas.width / this.canvas.height;
@@ -398,7 +550,12 @@ export class Renderer {
     const eye = vec3.fromValues(4, 3.5, 5);
     mat4.lookAt(view, eye, [0, 0, 0], [0, 1, 0]);
     mat4.multiply(this.viewProj, proj, view);
+
+    if (this.lightDragger) {
+      this.lightDragger.updateCamera(this.viewProj, eye);
+    }
   }
+
 
   private updateLightViewProj() {
     const lightPos = vec3.create();
@@ -484,19 +641,20 @@ export class Renderer {
     if (this.nbo) this.nbo.destroy();
     if (this.ibo) this.ibo.destroy();
     if (this.uniformBuf) this.uniformBuf.destroy();
+    if (this.lightSphereVBO) this.lightSphereVBO.destroy();
+    if (this.lightSphereIBO) this.lightSphereIBO.destroy();
     console.log('✓ Renderer destroyed');
   }
 
 
   private frame() {
     const { device, context } = this.gpu;
-    const t = (performance.now() - this.timeStart) / 1000;
 
     this.frameCount++;
     const now = performance.now();
     const deltaTime = (now - this.lastFrameTime) / 1000;
     this.lastFrameTime = now;
-    this.model = this.arcball.update(deltaTime);
+
     if (now - this.lastFpsUpdate > 500) {
       this.currentFps = Math.round((this.frameCount * 1000) / (now - this.lastFpsUpdate));
       this.frameCount = 0;
@@ -506,9 +664,7 @@ export class Renderer {
       }
     }
 
-    mat4.identity(this.model);
-    mat4.rotateY(this.model, this.model, t * 0.7);
-    mat4.rotateX(this.model, this.model, t * 0.4);
+    this.model = this.arcball.update(deltaTime);
 
     const lightDirNorm = vec3.create();
     vec3.normalize(lightDirNorm, this.lightDir);
@@ -546,9 +702,8 @@ export class Renderer {
 
     const encoder = device.createCommandEncoder();
 
-    // Shadow pass — выбираем pipeline в зависимости от метода
+    // Shadow pass
     if (this.shadowParams.method === 'VSM') {
-      // VSM: рендерим моменты в RGBA16F текстуру
       const vsmPass = encoder.beginRenderPass({
         colorAttachments: [{
           view: this.vsmMomentsView,
@@ -566,11 +721,10 @@ export class Renderer {
       vsmPass.setPipeline(this.vsmMomentsPipeline);
       vsmPass.setVertexBuffer(0, this.vbo);
       vsmPass.setIndexBuffer(this.ibo, 'uint16');
-      vsmPass.setBindGroup(0, this.bindGroup0VSMMoments); // ИЗМЕНЕНО: используем правильный bind group
+      vsmPass.setBindGroup(0, this.bindGroup0VSMMoments);
       vsmPass.drawIndexed(this.indexCount);
       vsmPass.end();
 
-      // Blur horizontal (moments -> blur)
       const blurH = encoder.beginComputePass();
       blurH.setPipeline(this.blurHorizontalPipeline);
       blurH.setBindGroup(0, this.vsmBlurBindGroup0);
@@ -579,7 +733,6 @@ export class Renderer {
       blurH.dispatchWorkgroups(workgroupsX, workgroupsY);
       blurH.end();
     } else {
-      // Обычный depth pass
       const shadowPass = encoder.beginRenderPass({
         colorAttachments: [],
         depthStencilAttachment: {
@@ -590,10 +743,18 @@ export class Renderer {
         }
       });
       shadowPass.setPipeline(this.shadowPipeline);
+
+      // Основная геометрия (indexed)
       shadowPass.setVertexBuffer(0, this.vbo);
       shadowPass.setIndexBuffer(this.ibo, 'uint16');
       shadowPass.setBindGroup(0, this.bindGroup0Shadow);
       shadowPass.drawIndexed(this.indexCount);
+
+      // Grid (non-indexed) - НЕ устанавливаем index buffer!
+      shadowPass.setVertexBuffer(0, this.gridVBO);
+      shadowPass.setBindGroup(0, this.bindGroup0Shadow);
+      shadowPass.draw(6);
+
       shadowPass.end();
     }
 
@@ -625,6 +786,47 @@ export class Renderer {
     mainPass.setBindGroup(1, this.bindGroup1Main);
     mainPass.drawIndexed(this.indexCount);
     mainPass.end();
+
+    // Grid pass
+    const gridPass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: context.getCurrentTexture().createView(),
+        loadOp: 'load',
+        storeOp: 'store'
+      }],
+      depthStencilAttachment: {
+        view: this.depthView,
+        depthLoadOp: 'load',
+        depthStoreOp: 'store'
+      }
+    });
+    gridPass.setPipeline(this.gridPipeline);
+    gridPass.setVertexBuffer(0, this.gridVBO);
+    gridPass.setVertexBuffer(1, this.gridNBO);
+    gridPass.setBindGroup(0, this.gridBindGroup);
+    gridPass.setBindGroup(1, this.gridBindGroup1);
+    gridPass.draw(6);
+    gridPass.end();
+
+    // Light sphere pass (рендерим последним поверх всего)
+    const spherePass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: context.getCurrentTexture().createView(),
+        loadOp: 'load', // НЕ очищаем
+        storeOp: 'store'
+      }],
+      depthStencilAttachment: {
+        view: this.depthView,
+        depthLoadOp: 'load',
+        depthStoreOp: 'store'
+      }
+    });
+    spherePass.setPipeline(this.lightSpherePipeline);
+    spherePass.setVertexBuffer(0, this.lightSphereVBO);
+    spherePass.setIndexBuffer(this.lightSphereIBO, 'uint16');
+    spherePass.setBindGroup(0, this.lightSphereBindGroup);
+    spherePass.drawIndexed(this.lightSphereIndexCount);
+    spherePass.end();
 
     device.queue.submit([encoder.finish()]);
   }
@@ -666,6 +868,75 @@ export class Renderer {
     if (methodChanged || sizeChanged) {
       this.recreateBindGroups();
       console.log(`Switched to ${params.method}, bind groups recreated`);
+    }
+  }
+
+  async loadModel(file: File) {
+    const loader = new ModelLoader();
+
+    try {
+      const url = URL.createObjectURL(file);
+      const model = await loader.loadOBJ(url);
+      URL.revokeObjectURL(url);
+
+      // Заменяем текущую геометрию
+      const { device } = this.gpu;
+
+      // Добавляем плоскость к загруженной модели
+      const planeStart = model.positions.length / 3;
+      const planePos = new Float32Array([
+        -4, -2.5, -4, 4, -2.5, -4, 4, -2.5, 4, -4, -2.5, 4  // y=-2.5
+      ]);
+      const planeNorm = new Float32Array([
+        0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0
+      ]);
+      const planeIdx = new Uint16Array([
+        planeStart, planeStart + 1, planeStart + 2,
+        planeStart, planeStart + 2, planeStart + 3
+      ]);
+
+      // Объединяем модель + плоскость
+      const finalPos = new Float32Array(model.positions.length + planePos.length);
+      finalPos.set(model.positions);
+      finalPos.set(planePos, model.positions.length);
+
+      const finalNorm = new Float32Array(model.normals.length + planeNorm.length);
+      finalNorm.set(model.normals);
+      finalNorm.set(planeNorm, model.normals.length);
+
+      const finalIdx = new Uint16Array(model.indices.length + planeIdx.length);
+      finalIdx.set(model.indices);
+      finalIdx.set(planeIdx, model.indices.length);
+
+      // Обновляем буферы
+      if (this.vbo) this.vbo.destroy();
+      if (this.nbo) this.nbo.destroy();
+      if (this.ibo) this.ibo.destroy();
+
+      this.vbo = device.createBuffer({
+        size: finalPos.byteLength,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+      });
+      device.queue.writeBuffer(this.vbo, 0, finalPos);
+
+      this.nbo = device.createBuffer({
+        size: finalNorm.byteLength,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+      });
+      device.queue.writeBuffer(this.nbo, 0, finalNorm);
+
+      this.ibo = device.createBuffer({
+        size: finalIdx.byteLength,
+        usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
+      });
+      device.queue.writeBuffer(this.ibo, 0, finalIdx);
+
+      this.indexCount = finalIdx.length;
+
+      console.log(`✓ Loaded OBJ: ${model.positions.length / 3} vertices, ${model.indices.length / 3} triangles`);
+    } catch (e) {
+      console.error('Failed to load OBJ:', e);
+      alert(`Ошибка загрузки модели: ${e}`);
     }
   }
 }

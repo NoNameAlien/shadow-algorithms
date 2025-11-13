@@ -84,10 +84,10 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   
   let visibility = shadowVisibilityVSM(input.lightSpacePos); // зависит от метода
   
-  let baseColor = vec3<f32>(0.7, 0.72, 0.75);
-  let ambient = 0.15; // Уменьшено с 0.25
+  let baseColor = vec3<f32>(0.55, 0.57, 0.6); // Уменьшен для меньшей яркости
+  let ambient = 0.55; // Увеличен с 0.15 до 0.4 для видимости затененных областей
   let diffuse = (1.0 - ambient) * lambert * visibility;
-  let finalColor = baseColor * (ambient + diffuse); // Убран clamp для контраста
+  let finalColor = baseColor * clamp(ambient + diffuse, 0.0, 1.0);
   return vec4<f32>(finalColor, 1.0);
 }
 

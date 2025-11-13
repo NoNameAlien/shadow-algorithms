@@ -36,10 +36,20 @@ export default function App() {
     }
   };
 
+  const handleLoadModel = async (file: File) => {
+    if (rendererRef.current) {
+      await rendererRef.current.loadModel(file);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#14161a', color: '#e6e6e6' }}>
       <canvas ref={ref} style={{ width: '100%', height: '100%', display: 'block' }} />
-      <ControlPanel onParamsChange={handleParamsChange} fps={fps} />
+      <ControlPanel
+        onParamsChange={handleParamsChange}
+        onLoadModel={handleLoadModel}
+        fps={fps}
+      />
       {error && (
         <div style={{ position: 'absolute', top: 12, left: 12, padding: 8, background: '#2b2f36', borderRadius: 6, maxWidth: 420 }}>
           <b>Ошибка WebGPU:</b> {error}

@@ -25,12 +25,11 @@ struct Uniforms {
 @vertex
 fn vs_main(input: VSIn) -> VSOut {
   var out: VSOut;
-  let world = u.model * vec4<f32>(input.position, 1.0);
-  out.clipPos = u.viewProj * world;
-  let nWorld = (u.model * vec4<f32>(input.normal, 0.0)).xyz;
-  out.worldN = normalize(nWorld);
-  out.worldPos = world.xyz;
-  out.lightSpacePos = u.lightViewProj * world;
+  // Grid не вращается (identity model matrix)
+  out.clipPos = u.viewProj * vec4<f32>(input.position, 1.0);
+  out.worldN = input.normal;
+  out.worldPos = input.position;
+  out.lightSpacePos = u.lightViewProj * vec4<f32>(input.position, 1.0);
   return out;
 }
 
@@ -49,20 +48,34 @@ fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
+  // Процедурная сетка (линии)
+  let gridSize = 1.0;
+  let coord = input.worldPos.xz / gridSize;
+  let grid = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
+  let line = min(grid.x, grid.y);
+  let gridAlpha = 1.0 - min(line, 1.0);
+  
+  // Освещение для grid
   let N = normalize(input.worldN);
-  
-  // ДИАГНОСТИКА: покажем нормали как цвета (временно)
-  // return vec4<f32>(N * 0.5 + 0.5, 1.0); // раскомментируй эту строку для отладки
-  
   let L = normalize(u.lightDir.xyz);
   let lambert = max(dot(N, L), 0.0);
-  
   let visibility = shadowVisibility(input.lightSpacePos);
   
-  let baseColor = vec3<f32>(0.55, 0.57, 0.6);
-  let ambient = 0.55;
+  // Цвет сетки
+  let gridColor = vec3<f32>(0.3, 0.35, 0.4);
+  let baseColor = vec3<f32>(0.15, 0.16, 0.18); // темнее для фона
+  
+  // Смешиваем сетку с фоном
+  let color = mix(baseColor, gridColor, gridAlpha);
+  
+  // Применяем освещение
+  let ambient = 0.6;
   let diffuse = (1.0 - ambient) * lambert * visibility;
-  let finalColor = baseColor * clamp(ambient + diffuse, 0.0, 1.0);
-  return vec4<f32>(finalColor, 1.0);
+  let finalColor = color * clamp(ambient + diffuse, 0.0, 1.0);
+  
+  // Затухание с расстоянием
+  let dist = length(input.worldPos.xz);
+  let fade = 1.0 - smoothstep(8.0, 20.0, dist);
+  
+  return vec4<f32>(finalColor, fade);
 }
-
