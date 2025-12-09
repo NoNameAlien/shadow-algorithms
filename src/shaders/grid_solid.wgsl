@@ -35,9 +35,12 @@ fn vs_main(input: VSIn) -> VSOut {
 
 fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
   let ndc = lightSpacePos.xyz / lightSpacePos.w;
-  let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5));
-  let depth = ndc.z - u.shadowParams.x;
-  
+  let uv = vec2<f32>(
+    ndc.x * 0.5 + 0.5,
+    1.0 - (ndc.y * 0.5 + 0.5)
+  );
+  let depth = ndc.z;
+
   let inBounds = ndc.x >= -1.0 && ndc.x <= 1.0 && 
                  ndc.y >= -1.0 && ndc.y <= 1.0 && 
                  ndc.z >= 0.0 && ndc.z <= 1.0;
@@ -45,6 +48,7 @@ fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
   let shadow = textureSampleCompare(shadowMap, shadowSampler, uv, depth);
   return select(shadow, 1.0, !inBounds);
 }
+
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {

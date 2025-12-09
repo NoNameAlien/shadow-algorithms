@@ -18,15 +18,15 @@ struct Uniforms {
 @vertex
 fn vs_main(input: VSIn) -> VSOut {
   var out: VSOut;
-  let lightPos = u.lightDir.xyz * 7.0;
+  // Позиция света = u.lightDir.xyz
+  let lightPos = u.lightDir.xyz;
   let worldPos = input.position + lightPos;
   out.clipPos = u.viewProj * vec4<f32>(worldPos, 1.0);
   return out;
 }
 
-
 @fragment
 fn fs_main() -> @location(0) vec4<f32> {
-  // Яркий желтый цвет для источника света
-  return vec4<f32>(1.0, 0.9, 0.3, 1.0);
+  let baseColor = vec4<f32>(1.0, 0.9, 0.3, 1.0);
+  return baseColor;
 }

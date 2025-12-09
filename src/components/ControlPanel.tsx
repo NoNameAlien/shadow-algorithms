@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 
 type Props = {
     onParamsChange: (params: ShadowParams) => void;
     onLoadModel: (file: File) => void;
     onResetScene?: () => void;
+    onResetModel?: () => void;
     fps?: number;
     isPointerLocked?: boolean;
 };
@@ -24,6 +25,7 @@ export function ControlPanel({
     onParamsChange,
     onLoadModel,
     onResetScene,
+    onResetModel,
     fps = 0,
     isPointerLocked = false
 }: Props) {
@@ -39,6 +41,8 @@ export function ControlPanel({
         vsmLightBleedReduction: 0.4
     });
 
+    const [modelName, setModelName] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
 
     const update = (partial: Partial<ShadowParams>) => {
         const newParams = { ...params, ...partial };
@@ -241,7 +245,12 @@ export function ControlPanel({
             )}
 
             <button
-                onClick={onResetScene}
+                onClick={() => {
+                    onResetScene?.();
+                    onResetModel?.();
+                    setModelName(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
                 style={{
                     width: '100%',
                     padding: 8,
@@ -262,29 +271,88 @@ export function ControlPanel({
                 <label style={{ display: 'block', fontSize: 11, marginBottom: 4, opacity: 0.7 }}>
                     Load Model (OBJ):
                 </label>
+
+                <div
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8
+                    }}
+                >
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        style={{
+                            padding: '4px 8px',
+                            fontSize: 11,
+                            background: '#2b2f36',
+                            color: '#e6e6e6',
+                            border: '1px solid #3a3f48',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap'
+                        }}
+                    >
+                        Choose OBJ
+                    </button>
+
+                    <span
+                        style={{
+                            flexGrow: 1,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            fontSize: 11,
+                            opacity: modelName ? 1 : 0.5
+                        }}
+                        title={modelName || 'No model loaded'}
+                    >
+                        {modelName ?
+                            modelName.length > 15
+                                ? modelName?.slice(0, 15)
+                                : modelName :
+                            'No model loaded'}
+                    </span>
+
+                    {modelName && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setModelName(null);
+                                if (fileInputRef.current) {
+                                    fileInputRef.current.value = '';
+                                }
+                                onResetModel?.();
+                            }}
+                            style={{
+                                border: 'none',
+                                background: 'transparent',
+                                color: '#aaa',
+                                cursor: 'pointer',
+                                fontSize: 14,
+                                padding: 0
+                            }}
+                            title="Remove model"
+                        >
+                            ×
+                        </button>
+                    )}
+                </div>
+
                 <input
+                    ref={fileInputRef}
                     type="file"
                     accept=".obj"
                     onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) {
+                            setModelName(file.name);
                             onLoadModel(file);
                         }
                     }}
-                    style={{
-                        width: '100%',
-                        padding: 4,
-                        fontSize: 11,
-                        background: '#2b2f36',
-                        color: '#e6e6e6',
-                        border: '1px solid #3a3f48',
-                        borderRadius: 4,
-                        cursor: 'pointer'
-                    }}
+                    style={{ display: 'none' }}
                 />
             </div>
-
-
 
             <div style={{
                 marginTop: 12,
@@ -313,7 +381,10 @@ export function ControlPanel({
                             🎮 ORBIT MODE (default)
                         </div>
                         <div>🖱️ <strong>Drag object</strong> - rotate object</div>
-                        <div>🎯 <strong>Shift+Drag</strong> - move light</div>
+                        <div>🖱️ <strong>Click object</strong> - select / show gizmo</div>
+                        <div>🖱️ <strong>Drag selected object</strong> - move object</div>
+                        <div>💡 <strong>Click light sphere</strong> - select light</div>
+                        <div>💡 <strong>Drag selected light</strong> - move light</div>
                         <div>⬆️⬇️ <strong>WASD/Arrows</strong> - rotate view</div>
                         <div>🔍 <strong>Mouse Wheel</strong> - zoom</div>
                         <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #2b2f36' }}>

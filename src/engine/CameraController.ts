@@ -16,6 +16,10 @@ export class CameraController {
     private yaw = 0;
     private pitch = 0;
 
+    // Стартовые значения (для reset и init)
+    private readonly defaultPosition = vec3.fromValues(4, 3.5, 5);
+    private readonly defaultTarget = vec3.fromValues(0, 0, 0);
+
     private mode: ControlMode = 'orbit';
     private keys = new Set<string>();
     private moveSpeed = 5.0;
@@ -25,17 +29,43 @@ export class CameraController {
 
     constructor(canvas: HTMLCanvasElement) {
         this.canvas = canvas;
+
+        // Стартовая позиция камеры
+        vec3.copy(this.position, this.defaultPosition);
+        vec3.copy(this.target, this.defaultTarget);
+
         this.setupHandlers();
-        this.calculateInitialPosition();
+        this.syncFromPosition();
     }
 
-    private calculateInitialPosition() {
-        // Вычисляем позицию из orbit параметров
-        this.position = vec3.fromValues(
-            this.target[0] + this.distance * Math.sin(this.phi) * Math.cos(this.theta),
-            this.target[1] + this.distance * Math.cos(this.phi),
-            this.target[2] + this.distance * Math.sin(this.phi) * Math.sin(this.theta)
-        );
+    // Синхронизирует orbit (distance/theta/phi) и FPS (yaw/pitch) с текущей позицией
+    private syncFromPosition() {
+        // Orbit: рассчитываем distance/theta/phi из позиции
+        const toEye = vec3.subtract(vec3.create(), this.position, this.target);
+        const r = vec3.length(toEye);
+        this.distance = r;
+
+        if (r > 0.0001) {
+            const dir = vec3.scale(vec3.create(), toEye, 1 / r);
+            // phi — угол от оси Y
+            this.phi = Math.acos(dir[1]);
+            // theta — угол в плоскости XZ
+            this.theta = Math.atan2(dir[0], dir[2]);
+        } else {
+            this.phi = Math.PI / 3;
+            this.theta = Math.PI / 4;
+        }
+
+        // FPS: yaw/pitch из направления на target
+        const forward = vec3.subtract(vec3.create(), this.target, this.position);
+        if (vec3.length(forward) > 0.0001) {
+            vec3.normalize(forward, forward);
+            this.yaw = Math.atan2(forward[0], forward[2]);
+            this.pitch = Math.asin(forward[1]);
+        } else {
+            this.yaw = 0;
+            this.pitch = 0;
+        }
     }
 
     private setupHandlers() {
@@ -128,38 +158,48 @@ export class CameraController {
     }
 
     private updateFPS(deltaTime: number) {
-        // Направления
-        const forward = vec3.fromValues(
-            Math.sin(this.yaw),
-            0,
-            Math.cos(this.yaw)
-        );
-        const right = vec3.fromValues(
-            Math.cos(this.yaw),
-            0,
-            -Math.sin(this.yaw)
-        );
+        // Направление взгляда (из getTarget, но без повторного clamp'а)
+        const target = this.getTarget();
+        const forward = vec3.subtract(vec3.create(), target, this.position);
 
-        // WASD движение
-        if (this.keys.has('w')) {
-            vec3.scaleAndAdd(this.position, this.position, forward, this.moveSpeed * deltaTime);
+        // Движение только в плоскости XZ
+        forward[1] = 0;
+        if (vec3.length(forward) > 0.0001) {
+            vec3.normalize(forward, forward);
         }
-        if (this.keys.has('s')) {
-            vec3.scaleAndAdd(this.position, this.position, forward, -this.moveSpeed * deltaTime);
+
+        // Правый вектор = forward × up
+        const up = vec3.fromValues(0, 1, 0);
+        const right = vec3.cross(vec3.create(), forward, up);
+        if (vec3.length(right) > 0.0001) {
+            vec3.normalize(right, right);
         }
-        if (this.keys.has('a')) {
-            vec3.scaleAndAdd(this.position, this.position, right, -this.moveSpeed * deltaTime);
+
+        const speed = this.moveSpeed * deltaTime;
+
+        // Вперёд/назад: W/S и стрелки Up/Down
+        let moveForward = 0;
+        if (this.keys.has('w') || this.keys.has('arrowup')) moveForward += 1;
+        if (this.keys.has('s') || this.keys.has('arrowdown')) moveForward -= 1;
+
+        // Влево/вправо: A/D и стрелки Left/Right
+        let moveRight = 0;
+        if (this.keys.has('d') || this.keys.has('arrowright')) moveRight += 1;
+        if (this.keys.has('a') || this.keys.has('arrowleft')) moveRight -= 1;
+
+        if (moveForward !== 0) {
+            vec3.scaleAndAdd(this.position, this.position, forward, moveForward * speed);
         }
-        if (this.keys.has('d')) {
-            vec3.scaleAndAdd(this.position, this.position, right, this.moveSpeed * deltaTime);
+        if (moveRight !== 0) {
+            vec3.scaleAndAdd(this.position, this.position, right, moveRight * speed);
         }
 
         // Space/Shift вертикаль
         if (this.keys.has(' ') || this.keys.has('space')) {
-            this.position[1] += this.moveSpeed * deltaTime;
+            this.position[1] += speed;
         }
         if (this.keys.has('shift')) {
-            this.position[1] -= this.moveSpeed * deltaTime;
+            this.position[1] -= speed;
         }
     }
 
@@ -189,12 +229,13 @@ export class CameraController {
 
     reset() {
         this.mode = 'orbit';
-        this.distance = 8.0;
-        this.theta = Math.PI / 4;
-        this.phi = Math.PI / 6;
-        this.calculateInitialPosition();
-        this.yaw = 0;
-        this.pitch = 0;
+
+        // Возвращаем позицию и цель к дефолтным
+        vec3.copy(this.position, this.defaultPosition);
+        vec3.copy(this.target, this.defaultTarget);
+
+        // Синхронизируем orbit (distance/theta/phi) и FPS (yaw/pitch)
+        this.syncFromPosition();
 
         if (this.isPointerLocked) {
             document.exitPointerLock();
@@ -202,6 +243,7 @@ export class CameraController {
 
         console.log('Camera reset to orbit mode');
     }
+
 
     isLocked(): boolean {
         return this.isPointerLocked;

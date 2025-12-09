@@ -7,7 +7,7 @@ export default function App() {
   const rendererRef = useRef<Renderer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fps, setFps] = useState(0);
-  const [isPointerLocked, setIsPointerLocked] = useState(false); 
+  const [isPointerLocked, setIsPointerLocked] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -50,9 +50,16 @@ export default function App() {
     }
   };
 
+  const handleResetModel = () => {
+    if (rendererRef.current) {
+      rendererRef.current.resetModel();
+    }
+  };
+
   const handleResetScene = () => {
     if (rendererRef.current) {
       rendererRef.current.resetScene();
+      rendererRef.current.resetModel();
     }
   };
 
@@ -63,6 +70,7 @@ export default function App() {
         onParamsChange={handleParamsChange}
         onLoadModel={handleLoadModel}
         onResetScene={handleResetScene}
+        onResetModel={handleResetModel}
         isPointerLocked={isPointerLocked}
         fps={fps}
       />

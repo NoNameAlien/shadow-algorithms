@@ -1,4 +1,4 @@
-import { mat4, vec3 } from 'gl-matrix';
+import { mat4, vec3, vec4 } from 'gl-matrix';
 import { initWebGPU } from '../gpu/initWebGPU';
 import basicWGSL from '../shaders/basic.wgsl?raw';
 import pcfWGSL from '../shaders/pcf.wgsl?raw';
@@ -12,8 +12,8 @@ import { ModelLoader } from '../loaders/ModelLoader';
 import gridSolidWGSL from '../shaders/grid_solid.wgsl?raw';
 import lightSphereWGSL from '../shaders/light_sphere.wgsl?raw';
 import { SphereGenerator } from '../geometry/SphereGenerator';
-import { LightDragger } from './LightDragger';
 import { CameraController } from './CameraController';
+import axisGizmoWGSL from '../shaders/axis_gizmo.wgsl?raw';
 
 type GPUCtx = {
   device: GPUDevice;
@@ -21,8 +21,35 @@ type GPUCtx = {
   format: GPUTextureFormat;
   configure: () => void;
 };
+type Selection = 'none' | 'object' | 'light';
 
 export type ShadowMethod = 'SM' | 'PCF' | 'PCSS' | 'VSM';
+
+function orthoZO(out: mat4, left: number, right: number, bottom: number, top: number, near: number, far: number) {
+  const lr = 1 / (left - right);
+  const bt = 1 / (bottom - top);
+  const nf = 1 / (near - far);
+
+  out[0] = -2 * lr;
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0;
+
+  out[4] = 0;
+  out[5] = -2 * bt;
+  out[6] = 0;
+  out[7] = 0;
+
+  out[8] = 0;
+  out[9] = 0;
+  out[10] = nf;
+  out[11] = 0;
+
+  out[12] = (left + right) * lr;
+  out[13] = (top + bottom) * bt;
+  out[14] = near * nf;
+  out[15] = 1;
+}
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -39,8 +66,11 @@ export class Renderer {
   private arcball!: ArcballController;
   private lastFrameTime = performance.now();
   private gridNBO!: GPUBuffer;
-  private lightDragger!: LightDragger;
   public cameraController!: CameraController;
+  private selection: Selection = 'none';
+  private objectPos = vec3.fromValues(0, 0, 0); // центр объекта в мире
+  private lightSelected = false;
+  private readonly lightDistance = 10;
 
   private shadowSize = 2048;
   private shadowTex!: GPUTexture;
@@ -66,7 +96,22 @@ export class Renderer {
   private ibo!: GPUBuffer;
   private indexCount = 0;
 
+  private dragAxisIndex: number = -1;        // 0 = X, 1 = Y, 2 = Z
+  private dragAxisWorldDir = vec3.create();  // направление оси в мире
+  private dragAxisScreenDir = { x: 0, y: 0 }; // направление оси на экране
+  private dragStartMouseX = 0;
+  private dragStartMouseY = 0;
+
+  private isDraggingObject = false;
+  private objectDragStartPos = vec3.create();
+  private objectDragStartHit = vec3.create();
+
+  private isDraggingLight = false;
+  private lightDragStartDir = vec3.create();
+  private lightDragStartHit = vec3.create();
+
   private uniformBuf!: GPUBuffer;
+  private axisUniformBuf!: GPUBuffer;
   private bindGroup0Main!: GPUBindGroup;
   private bindGroup0Shadow!: GPUBindGroup;
   private bindGroup0VSMMoments!: GPUBindGroup;
@@ -78,9 +123,15 @@ export class Renderer {
   private gridBindGroup!: GPUBindGroup;
   private gridBindGroup1!: GPUBindGroup;
 
+  private axisPipeline!: GPURenderPipeline;
+  private axisVBO!: GPUBuffer;
+  private axisIBO!: GPUBuffer;
+  private axisIndexCount = 0;
+  private axisBindGroup!: GPUBindGroup;
+
   private viewProj = mat4.create();
   private model = mat4.create();
-  private lightDir = vec3.fromValues(0.5, 1.0, 0.3);
+  private lightDir = vec3.fromValues(5, 10, 3);
   private lightViewProj = mat4.create();
 
   private rafId = 0;
@@ -118,21 +169,102 @@ export class Renderer {
     this.createGeometry();
     this.createGrid();
     this.createLightSphere();
+    this.createAxisGizmo();
     this.createUniforms();
     this.updateViewProj();
     this.updateLightViewProj();
 
-    const cameraPos = this.cameraController.getCameraPosition();
-    this.lightDragger = new LightDragger(
-      this.canvas,
-      this.viewProj,
-      cameraPos,
-      (newLightDir) => {
-        // Callback: обновляем направление света
-        vec3.copy(this.lightDir, newLightDir);
-        this.updateLightViewProj(); // Пересчитываем shadow map
+    // Обработка мыши для выбора и перетаскивания
+    this.canvas.addEventListener('mousedown', (e) => {
+      if (e.ctrlKey || e.shiftKey) return;
+      if (this.cameraController.isLocked()) return;
+      if (e.button !== 0) return;
+
+      // Если уже выбран объект или свет — пробуем начать drag по оси
+      if (this.selection === 'object' || this.selection === 'light') {
+        const axisIndex = this.pickAxisHit(e.clientX, e.clientY);
+        if (axisIndex !== -1) {
+          this.dragAxisIndex = axisIndex;
+          this.dragStartMouseX = e.clientX;
+          this.dragStartMouseY = e.clientY;
+
+          if (this.selection === 'object') {
+            this.isDraggingObject = true;
+            vec3.copy(this.objectDragStartPos, this.objectPos);
+          } else {
+            this.isDraggingLight = true;
+            // стартовая позиция света
+            vec3.copy(this.lightDragStartHit, this.lightDir);
+          }
+
+          this.canvas.style.cursor = 'move';
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
       }
-    );
+
+      // Иначе — просто выбор объекта/света (вращение делает Arcball)
+      this.handleSelectionClick(e.clientX, e.clientY);
+    });
+
+    this.canvas.addEventListener('mousemove', (e) => {
+      if (this.isDraggingObject && this.dragAxisIndex !== -1) {
+        const rect = this.canvas.getBoundingClientRect();
+        const dx = e.clientX - this.dragStartMouseX;
+        const dy = e.clientY - this.dragStartMouseY;
+
+        const proj = dx * this.dragAxisScreenDir.x + dy * this.dragAxisScreenDir.y;
+
+        const camPos = this.cameraController.getCameraPosition();
+        const toObj = vec3.subtract(vec3.create(), this.objectDragStartPos, camPos);
+        const dist = vec3.length(toObj) || 1;
+
+        const worldScale = dist * 0.005;
+        const t = proj * worldScale;
+
+        const newPos = vec3.scaleAndAdd(
+          vec3.create(),
+          this.objectDragStartPos,
+          this.dragAxisWorldDir,
+          t
+        );
+        vec3.copy(this.objectPos, newPos);
+      } else if (this.isDraggingLight && this.dragAxisIndex !== -1) {
+        const rect = this.canvas.getBoundingClientRect();
+        const dx = e.clientX - this.dragStartMouseX;
+        const dy = e.clientY - this.dragStartMouseY;
+
+        const proj = dx * this.dragAxisScreenDir.x + dy * this.dragAxisScreenDir.y;
+
+        const camPos = this.cameraController.getCameraPosition();
+        const toLight = vec3.subtract(vec3.create(), this.lightDragStartHit, camPos);
+        const dist = vec3.length(toLight) || 1;
+
+        const worldScale = dist * 0.005;
+        const t = proj * worldScale;
+
+        // новая позиция света вдоль оси
+        const newPos = vec3.scaleAndAdd(
+          vec3.create(),
+          this.lightDragStartHit,
+          this.dragAxisWorldDir,
+          t
+        );
+
+        vec3.copy(this.lightDir, newPos); // lightDir теперь = позиция света
+        this.updateLightViewProj();
+      }
+    });
+
+    this.canvas.addEventListener('mouseup', () => {
+      if (this.isDraggingObject || this.isDraggingLight) {
+        this.isDraggingObject = false;
+        this.isDraggingLight = false;
+        this.dragAxisIndex = -1;
+        this.canvas.style.cursor = 'default';
+      }
+    });
 
     window.addEventListener('resize', () => {
       this.gpu.configure();
@@ -142,10 +274,191 @@ export class Renderer {
     });
   }
 
-
-
   setFpsCallback(callback: (fps: number) => void) {
     this.fpsCallback = callback;
+  }
+
+  private handleSelectionClick(clientX: number, clientY: number) {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const y = 1 - ((clientY - rect.top) / rect.height) * 2;
+
+    const invViewProj = mat4.invert(mat4.create(), this.viewProj);
+    if (!invViewProj) return;
+
+    const nearPoint = vec3.fromValues(x, y, -1);
+    const farPoint = vec3.fromValues(x, y, 1);
+
+    const worldNear = vec3.transformMat4(vec3.create(), nearPoint, invViewProj);
+    const worldFar = vec3.transformMat4(vec3.create(), farPoint, invViewProj);
+
+    const rayDir = vec3.subtract(vec3.create(), worldFar, worldNear);
+    vec3.normalize(rayDir, rayDir);
+    const rayOrigin = this.cameraController.getCameraPosition();
+
+    // 1) Объект
+    const objectRadius = 1.5;
+    if (this.raySphereIntersect(rayOrigin, rayDir, this.objectPos, objectRadius)) {
+      this.setSelection('object');
+      return;
+    }
+
+    // 2) Свет (сфера)
+    const lightPos = vec3.clone(this.lightDir);
+    const lightRadius = 1.2;
+
+    if (this.raySphereIntersect(rayOrigin, rayDir, lightPos, lightRadius)) {
+      this.setSelection('light');
+      return;
+    }
+
+    // 3) Ничего
+    this.setSelection('none');
+  }
+
+  private pickAxisHit(clientX: number, clientY: number): number {
+    const axisLength = 2.2;
+    const pickThresholdPx = 20; // было 10 — сделаем зону захвата шире
+
+    const rect = this.canvas.getBoundingClientRect();
+    const mouseX = clientX - rect.left;
+    const mouseY = clientY - rect.top;
+
+    // МИРОВЫЕ оси (как рисуются в шейдере gizmo)
+    let originWorld: vec3;
+    if (this.selection === 'light') {
+      originWorld = vec3.clone(this.lightDir);
+    } else {
+      originWorld = vec3.clone(this.objectPos);
+    }
+
+    const axesWorld = [
+      vec3.fromValues(1, 0, 0), // X
+      vec3.fromValues(0, 1, 0), // Y
+      vec3.fromValues(0, 0, 1), // Z
+    ];
+
+    const projectToScreen = (p: vec3): { x: number; y: number; ok: boolean } => {
+      const v4 = vec4.fromValues(p[0], p[1], p[2], 1.0);
+      const out = vec4.create();
+      vec4.transformMat4(out, v4, this.viewProj);
+      const w = out[3];
+      if (w === 0) return { x: 0, y: 0, ok: false };
+
+      const ndcX = out[0] / w;
+      const ndcY = out[1] / w;
+
+      const sx = (ndcX * 0.5 + 0.5) * rect.width;
+      const sy = (1 - (ndcY * 0.5 + 0.5)) * rect.height;
+
+      return { x: sx, y: sy, ok: true };
+    };
+
+    let bestAxis = -1;
+    let bestDist = Number.POSITIVE_INFINITY;
+
+    for (let axisIndex = 0; axisIndex < axesWorld.length; axisIndex++) {
+      const dirWorld = axesWorld[axisIndex]; // уже нормализованный
+
+      const endWorld = vec3.scaleAndAdd(vec3.create(), originWorld, dirWorld, axisLength);
+
+      const p0 = projectToScreen(originWorld);
+      const p1 = projectToScreen(endWorld);
+      if (!p0.ok || !p1.ok) continue;
+
+      const vx = p1.x - p0.x;
+      const vy = p1.y - p0.y;
+      const wx = mouseX - p0.x;
+      const wy = mouseY - p0.y;
+
+      const c1 = vx * wx + vy * wy;
+      let t = 0;
+      if (c1 <= 0) {
+        t = 0;
+      } else {
+        const c2 = vx * vx + vy * vy;
+        if (c2 <= c1) t = 1;
+        else t = c1 / c2;
+      }
+
+      const projX = p0.x + t * vx;
+      const projY = p0.y + t * vy;
+
+      const dx = mouseX - projX;
+      const dy = mouseY - projY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < bestDist && dist <= pickThresholdPx) {
+        bestDist = dist;
+        bestAxis = axisIndex;
+
+        // сохраняем текущие направления для drag
+        vec3.copy(this.dragAxisWorldDir, dirWorld);
+        const len2D = Math.sqrt(vx * vx + vy * vy) || 1;
+        this.dragAxisScreenDir = { x: vx / len2D, y: vy / len2D };
+      }
+    }
+
+    return bestAxis;
+  }
+
+  private raySphereIntersect(origin: vec3, dir: vec3, center: vec3, radius: number): boolean {
+    // Решаем |O + tD - C|^2 = R^2
+    const oc = vec3.subtract(vec3.create(), origin, center);
+    const a = vec3.dot(dir, dir);
+    const b = 2 * vec3.dot(oc, dir);
+    const c = vec3.dot(oc, oc) - radius * radius;
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant < 0) return false;
+    const t1 = (-b - Math.sqrt(discriminant)) / (2 * a);
+    const t2 = (-b + Math.sqrt(discriminant)) / (2 * a);
+    return t1 >= 0 || t2 >= 0;
+  }
+
+  private screenToWorldOnPlane(clientX: number, clientY: number, planeY: number): vec3 | null {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const y = 1 - ((clientY - rect.top) / rect.height) * 2;
+
+    const invViewProj = mat4.invert(mat4.create(), this.viewProj);
+    if (!invViewProj) return null;
+
+    const nearPoint = vec3.fromValues(x, y, -1);
+    const farPoint = vec3.fromValues(x, y, 1);
+
+    const worldNear = vec3.transformMat4(vec3.create(), nearPoint, invViewProj);
+    const worldFar = vec3.transformMat4(vec3.create(), farPoint, invViewProj);
+
+    const rayDir = vec3.subtract(vec3.create(), worldFar, worldNear);
+    vec3.normalize(rayDir, rayDir);
+
+    const rayOrigin = this.cameraController.getCameraPosition();
+
+    const denom = rayDir[1];
+    if (Math.abs(denom) < 1e-4) return null;
+
+    const t = (planeY - rayOrigin[1]) / denom;
+    if (t <= 0) return null;
+
+    const hit = vec3.create();
+    vec3.scaleAndAdd(hit, rayOrigin, rayDir, t);
+    return hit;
+  }
+
+  private setSelection(sel: Selection) {
+    if (this.selection === sel) return;
+    this.selection = sel;
+
+    this.lightSelected = (sel === 'light');  // ← флаг
+
+    if (sel === 'object') {
+      console.log('Object selected');
+    } else if (sel === 'light') {
+      console.log('Light selected');
+    } else {
+      console.log('Selection cleared');
+      this.arcball.resume();
+    }
   }
 
   private createDepth() {
@@ -328,6 +641,28 @@ export class Renderer {
         depthCompare: 'less'
       }
     });
+    // Axis gizmo pipeline (lines)
+    const axisModule = device.createShaderModule({ code: axisGizmoWGSL });
+    const axisBufferLayout: GPUVertexBufferLayout = {
+      arrayStride: 6 * 4, // 3 pos + 3 color
+      attributes: [
+        { shaderLocation: 0, format: 'float32x3', offset: 0 },
+        { shaderLocation: 1, format: 'float32x3', offset: 3 * 4 }
+      ]
+    };
+
+    this.axisPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: axisModule, entryPoint: 'vs_main', buffers: [axisBufferLayout] },
+      fragment: {
+        module: axisModule,
+        entryPoint: 'fs_main',
+        targets: [{ format }]
+      },
+      primitive: { topology: 'line-list', cullMode: 'none' },
+      // ВАЖНО: без depthStencil → gizmo рисуется поверх всего
+    });
+    console.log('✓ Axis gizmo pipeline created');
     console.log('✓ Light sphere pipeline created');
   }
 
@@ -449,11 +784,83 @@ export class Renderer {
     console.log('✓ Light sphere geometry created');
   }
 
+  private createAxisGizmo() {
+    const { device } = this.gpu;
+    const size = 2.2; // длина осей, чуть больше
+    const verts: number[] = [];
+    const idx: number[] = [];
+    let base = 0;
+
+    const pushLine = (
+      x1: number, y1: number, z1: number,
+      x2: number, y2: number, z2: number,
+      r: number, g: number, b: number
+    ) => {
+      verts.push(
+        x1, y1, z1, r, g, b,
+        x2, y2, z2, r, g, b
+      );
+      idx.push(base, base + 1);
+      base += 2;
+    };
+
+    // Одна линия на каждую ось
+
+    // X axis (красный)
+    pushLine(0, 0, 0, size, 0, 0, 1, 0, 0);
+
+    // Y axis (зелёный)
+    pushLine(0, 0, 0, 0, size, 0, 0, 1, 0);
+
+    // Z axis (синий)
+    pushLine(0, 0, 0, 0, 0, size, 0, 0, 1);
+
+    // ОКРУЖНОСТЬ в плоскости XZ (белая) — "ось" вращения вокруг Y
+    const circleRadius = size * 0.9;
+    const circleSegments = 32;
+
+    for (let i = 0; i < circleSegments; i++) {
+      const a0 = (i / circleSegments) * Math.PI * 2;
+      const a1 = ((i + 1) / circleSegments) * Math.PI * 2;
+
+      const x0 = Math.cos(a0) * circleRadius;
+      const z0 = Math.sin(a0) * circleRadius;
+      const x1 = Math.cos(a1) * circleRadius;
+      const z1 = Math.sin(a1) * circleRadius;
+
+      pushLine(x0, 0, z0, x1, 0, z1, 1, 1, 1);
+    }
+
+    const vertices = new Float32Array(verts);
+    const indices = new Uint16Array(idx);
+
+    this.axisIndexCount = indices.length;
+
+    this.axisVBO = device.createBuffer({
+      size: vertices.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(this.axisVBO, 0, vertices);
+
+    this.axisIBO = device.createBuffer({
+      size: indices.byteLength,
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(this.axisIBO, 0, indices);
+
+    console.log('✓ Axis gizmo geometry created');
+  }
 
   private createUniforms() {
     const { device } = this.gpu;
     const uniformSize = 16 * 4 * 3 + 4 * 4 * 2;
+
     this.uniformBuf = device.createBuffer({
+      size: uniformSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+
+    this.axisUniformBuf = device.createBuffer({
       size: uniformSize,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
@@ -538,6 +945,12 @@ export class Renderer {
       entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }]
     });
 
+    // Axis gizmo bind group
+    this.axisBindGroup = device.createBindGroup({
+      layout: this.axisPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this.axisUniformBuf } }]
+    });
+
   }
 
 
@@ -548,28 +961,18 @@ export class Renderer {
 
     const view = this.cameraController.getViewMatrix();
     mat4.multiply(this.viewProj, proj, view);
-
-    // Обновляем lightDragger
-    if (this.lightDragger) {
-      const cameraPos = this.cameraController.getCameraPosition();
-      this.lightDragger.updateCamera(this.viewProj, cameraPos);
-    }
   }
 
-
-
   private updateLightViewProj() {
-    const lightPos = vec3.create();
-    vec3.scale(lightPos, this.lightDir, 10);
+    // Позиция света в мире
+    const lightPos = vec3.clone(this.lightDir);
+
+    // Нормаль направления света для up-вектора
+    const lightDirNorm = vec3.normalize(vec3.create(), lightPos);
 
     let up = vec3.fromValues(0, 1, 0);
-
-    // Если свет почти вертикален, используем другой up вектор
-    const lightDirNorm = vec3.normalize(vec3.create(), this.lightDir);
     const dotUp = Math.abs(vec3.dot(lightDirNorm, [0, 1, 0]));
-
     if (dotUp > 0.99) {
-      // Свет почти вертикален → используем Z как up
       up = vec3.fromValues(0, 0, 1);
     }
 
@@ -577,7 +980,10 @@ export class Renderer {
     mat4.lookAt(lightView, lightPos, [0, 0, 0], up);
 
     const lightProj = mat4.create();
-    mat4.ortho(lightProj, -8, 8, -8, 8, 1, 20);
+    const size = 8;
+    const near = 1.0;
+    const far = 20.0;
+    orthoZO(lightProj, -size, size, -size, size, near, far);
 
     mat4.multiply(this.lightViewProj, lightProj, lightView);
   }
@@ -606,6 +1012,9 @@ export class Renderer {
     if (this.uniformBuf) this.uniformBuf.destroy();
     if (this.lightSphereVBO) this.lightSphereVBO.destroy();
     if (this.lightSphereIBO) this.lightSphereIBO.destroy();
+    if (this.axisVBO) this.axisVBO.destroy();
+    if (this.axisIBO) this.axisIBO.destroy();
+    if (this.axisUniformBuf) this.axisUniformBuf.destroy();
     console.log('✓ Renderer destroyed');
   }
 
@@ -630,16 +1039,28 @@ export class Renderer {
     this.cameraController.update(deltaTime);
     this.updateViewProj();
 
-    this.model = this.arcball.update(deltaTime);
+    // Если тащим объект по оси gizmo — не крутим его
+    const arcballDelta = this.isDraggingObject ? 0 : deltaTime;
+    const rotation = this.arcball.update(arcballDelta);
 
-    const lightDirNorm = vec3.create();
-    vec3.normalize(lightDirNorm, this.lightDir);
+    // Собираем модельную матрицу = Translation(objectPos) * Rotation
+    const model = mat4.create();
+    mat4.fromTranslation(model, this.objectPos);
+    mat4.multiply(model, model, rotation);
+    this.model = model;
+
+    const lightPos = this.lightDir;
 
     const tmp = new Float32Array(16 * 3 + 4 * 2);
     tmp.set(this.model, 0);
     tmp.set(this.viewProj, 16);
     tmp.set(this.lightViewProj, 32);
-    tmp.set([lightDirNorm[0], lightDirNorm[1], lightDirNorm[2], 0], 48);
+    tmp.set([
+      lightPos[0],
+      lightPos[1],
+      lightPos[2],
+      this.lightSelected ? 1 : 0
+    ], 48);
 
     if (this.shadowParams.method === 'PCSS') {
       tmp.set([
@@ -665,6 +1086,31 @@ export class Renderer {
     }
 
     device.queue.writeBuffer(this.uniformBuf, 0, tmp.buffer);
+    // Обновляем uniform для gizmo (оси объекта или света)
+    if (this.selection !== 'none') {
+      const axisModel = mat4.create();
+
+      if (this.selection === 'object') {
+        mat4.copy(axisModel, this.model);
+      } else {
+        // Gizmo в центре света
+        mat4.fromTranslation(axisModel, this.lightDir);
+      }
+
+      const tmpAxis = new Float32Array(16 * 3 + 4 * 2);
+      tmpAxis.set(axisModel, 0);
+      tmpAxis.set(this.viewProj, 16);
+      tmpAxis.set(this.lightViewProj, 32);
+      tmpAxis.set([
+        lightPos[0],
+        lightPos[1],
+        lightPos[2],
+        this.lightSelected ? 1 : 0
+      ], 48);
+      tmpAxis.set(tmp.subarray(52, 56), 52);
+
+      device.queue.writeBuffer(this.axisUniformBuf, 0, tmpAxis.buffer);
+    }
 
     const encoder = device.createCommandEncoder();
 
@@ -789,6 +1235,23 @@ export class Renderer {
     spherePass.drawIndexed(this.lightSphereIndexCount);
     spherePass.end();
 
+    // Axis gizmo pass (если выбран объект ИЛИ свет)
+    if (this.selection === 'object' || this.selection === 'light') {
+      const axisPass = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: context.getCurrentTexture().createView(),
+          loadOp: 'load',
+          storeOp: 'store'
+        }],
+      });
+      axisPass.setPipeline(this.axisPipeline);
+      axisPass.setVertexBuffer(0, this.axisVBO);
+      axisPass.setIndexBuffer(this.axisIBO, 'uint16');
+      axisPass.setBindGroup(0, this.axisBindGroup);
+      axisPass.drawIndexed(this.axisIndexCount);
+      axisPass.end();
+    }
+
     device.queue.submit([encoder.finish()]);
   }
 
@@ -833,13 +1296,32 @@ export class Renderer {
   }
 
   resetScene() {
+    // Сбрасываем камеру
     this.cameraController.reset();
     this.updateViewProj();
-    this.createGeometry();
-    this.lightDir = vec3.fromValues(0.5, 1.0, 0.3);
+
+    // Сбрасываем свет
+    this.lightDir = vec3.fromValues(5, 10, 3);
     this.updateLightViewProj();
+
+    // Сбрасываем вращение объекта
     this.arcball.reset();
-    console.log('✓ Scene reset to defaults');
+
+    // Сбрасываем позицию объекта и выделение
+    vec3.set(this.objectPos, 0, 0, 0);
+    this.selection = 'none';
+    this.isDraggingObject = false;
+    this.isDraggingLight = false;
+    this.dragAxisIndex = -1;
+    this.canvas.style.cursor = 'default';
+
+    console.log('✓ Scene reset to defaults (camera/light/object)');
+  }
+
+  resetModel() {
+    // Возвращаем дефолтную геометрию (куб)
+    this.createGeometry();
+    console.log('✓ Model reset to default cube');
   }
 
   async loadModel(file: File) {

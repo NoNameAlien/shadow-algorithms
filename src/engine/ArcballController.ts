@@ -10,6 +10,7 @@ export class ArcballController {
     private lastMousePos = { x: 0, y: 0 };
     private isDragging = false;
     private canvas: HTMLCanvasElement;
+    public enabled = true;
 
     constructor(canvas: HTMLCanvasElement) {
         this.canvas = canvas;
@@ -18,8 +19,8 @@ export class ArcballController {
 
     private setupHandlers() {
         this.canvas.addEventListener('mousedown', (e) => {
-            // НЕ работаем если зажат Ctrl (это для входа в FPS режим)
-            if (e.ctrlKey) return;
+            // НЕ работаем если зажат Ctrl (FPS) или вращение выключено
+            if (e.ctrlKey || !this.enabled) return;
 
             this.isDragging = true;
             this.state = 'dragging';
@@ -44,13 +45,20 @@ export class ArcballController {
         this.canvas.addEventListener('mouseup', () => {
             this.isDragging = false;
             this.state = 'paused';
-            this.pauseEndTime = performance.now() + 500000;
+            this.pauseEndTime = performance.now() + 3000;
             this.canvas.style.cursor = 'default';
         });
     }
 
 
     update(deltaTime: number): mat4 {
+        // Если вращение отключено, просто вернуть матрицу из текущего quaternion
+        if (!this.enabled) {
+            const matrix = mat4.create();
+            mat4.fromQuat(matrix, this.rotation);
+            return matrix;
+        }
+
         const now = performance.now();
 
         if (this.state === 'paused' && now > this.pauseEndTime) {
@@ -79,5 +87,10 @@ export class ArcballController {
         this.state = 'animated';
         this.pauseEndTime = 0;
         console.log('Arcball rotation reset');
+    }
+
+    resume() {
+        this.state = 'animated';
+        this.pauseEndTime = 0;
     }
 }
