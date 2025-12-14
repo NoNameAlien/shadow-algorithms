@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Renderer } from './engine/Renderer';
 import { ControlPanel, type ShadowParams } from './components/ControlPanel';
+import type { LightMode } from './engine/Renderer';
 
 export default function App() {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -8,6 +9,10 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [fps, setFps] = useState(0);
   const [isPointerLocked, setIsPointerLocked] = useState(false);
+  const [lightMode, setLightMode] = useState<LightMode>('sun');
+  type Lang = 'en' | 'ru';
+  const [lang, setLang] = useState<Lang>('ru');
+
 
   useEffect(() => {
     (async () => {
@@ -59,8 +64,22 @@ export default function App() {
   const handleResetScene = () => {
     if (rendererRef.current) {
       rendererRef.current.resetScene();
-      rendererRef.current.resetModel();
     }
+  };
+
+  const handleLightModeChange = (mode: LightMode) => {
+    setLightMode(mode);
+    if (rendererRef.current) {
+      rendererRef.current.setLightMode(mode);
+    }
+  };
+
+  const handleLoadObjectTexture = (file: File) => {
+    rendererRef.current?.loadObjectTexture(file);
+  };
+
+  const handleLoadFloorTexture = (file: File) => {
+    rendererRef.current?.loadFloorTexture(file);
   };
 
   return (
@@ -73,6 +92,12 @@ export default function App() {
         onResetModel={handleResetModel}
         isPointerLocked={isPointerLocked}
         fps={fps}
+        lightMode={lightMode}
+        onLightModeChange={handleLightModeChange}
+        onLoadObjectTexture={handleLoadObjectTexture}
+        onLoadFloorTexture={handleLoadFloorTexture}
+        lang={lang}
+        onLanguageChange={setLang}
       />
       {error && (
         <div style={{ position: 'absolute', top: 12, left: 12, padding: 8, background: '#2b2f36', borderRadius: 6, maxWidth: 420 }}>

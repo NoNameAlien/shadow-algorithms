@@ -24,6 +24,7 @@ type GPUCtx = {
 type Selection = 'none' | 'object' | 'light';
 
 export type ShadowMethod = 'SM' | 'PCF' | 'PCSS' | 'VSM';
+export type LightMode = 'sun' | 'spot' | 'top';
 
 function orthoZO(out: mat4, left: number, right: number, bottom: number, top: number, near: number, far: number) {
   const lr = 1 / (left - right);
@@ -66,11 +67,11 @@ export class Renderer {
   private arcball!: ArcballController;
   private lastFrameTime = performance.now();
   private gridNBO!: GPUBuffer;
+  private gridTBO!: GPUBuffer;
   public cameraController!: CameraController;
   private selection: Selection = 'none';
   private objectPos = vec3.fromValues(0, 0, 0); // центр объекта в мире
   private lightSelected = false;
-  private readonly lightDistance = 10;
 
   private shadowSize = 2048;
   private shadowTex!: GPUTexture;
@@ -86,14 +87,25 @@ export class Renderer {
   private vsmSampler!: GPUSampler;
 
   private lightSpherePipeline!: GPURenderPipeline;
-  private lightSphereVBO!: GPUBuffer;
-  private lightSphereIBO!: GPUBuffer;
-  private lightSphereIndexCount = 0;
+
+  private lightSunVBO!: GPUBuffer;
+  private lightSunIBO!: GPUBuffer;
+  private lightSunIndexCount = 0;
+
+  private lightSpotVBO!: GPUBuffer;
+  private lightSpotIBO!: GPUBuffer;
+  private lightSpotIndexCount = 0;
+
+  private lightTopVBO!: GPUBuffer;
+  private lightTopIBO!: GPUBuffer;
+  private lightTopIndexCount = 0;
+
   private lightSphereBindGroup!: GPUBindGroup;
 
   private vbo!: GPUBuffer;
   private nbo!: GPUBuffer;
   private ibo!: GPUBuffer;
+  private tbo!: GPUBuffer;
   private indexCount = 0;
 
   private dragAxisIndex: number = -1;        // 0 = X, 1 = Y, 2 = Z
@@ -102,12 +114,20 @@ export class Renderer {
   private dragStartMouseX = 0;
   private dragStartMouseY = 0;
 
+  // Ориентация прожектора (spot) вокруг своей позиции
+  private spotYaw = 0;    // вокруг Y
+  private spotPitch = 0;  // наклон вверх/вниз
+
+  private isRotatingLight = false;
+  private rotateStartYaw = 0;
+  private rotateStartPitch = 0;
+  private rotateStartMouseX = 0;
+  private rotateStartMouseY = 0;
+
   private isDraggingObject = false;
   private objectDragStartPos = vec3.create();
-  private objectDragStartHit = vec3.create();
 
   private isDraggingLight = false;
-  private lightDragStartDir = vec3.create();
   private lightDragStartHit = vec3.create();
 
   private uniformBuf!: GPUBuffer;
@@ -117,6 +137,20 @@ export class Renderer {
   private bindGroup0VSMMoments!: GPUBindGroup;
   private bindGroup1Main!: GPUBindGroup;
   private vsmBlurBindGroup0!: GPUBindGroup; // input -> output
+
+  private shadingBuf!: GPUBuffer;
+  private shadingBindGroupMain: GPUBindGroup | null = null;
+  private shadingBindGroupGrid!: GPUBindGroup;
+
+  private objTexture!: GPUTexture;
+  private objTextureView!: GPUTextureView;
+  private objSampler!: GPUSampler;
+  private objTexBindGroup: GPUBindGroup | null = null;
+
+  private floorTexture!: GPUTexture;
+  private floorTextureView!: GPUTextureView;
+  private floorSampler!: GPUSampler;
+  private floorTexBindGroup!: GPUBindGroup;
 
   private gridPipeline!: GPURenderPipeline;
   private gridVBO!: GPUBuffer;
@@ -150,8 +184,36 @@ export class Renderer {
     pcssLightSize: 0.05,
     pcssBlockerSearchSamples: 16,
     vsmMinVariance: 0.00001,
-    vsmLightBleedReduction: 0.3
+    vsmLightBleedReduction: 0.3,
+    shadowStrength: 1.0
   };
+  private lightMode: LightMode = 'sun';
+  private shadowStrength = 1.0;
+
+  setLightMode(mode: LightMode) {
+    this.lightMode = mode;
+  }
+
+  private getLightModeIndex(): number {
+    switch (this.lightMode) {
+      case 'sun': return 0;
+      case 'spot': return 1;
+      case 'top': return 2;
+    }
+  }
+
+  private initSpotOrientationFromPosition() {
+    const pos = this.lightDir;
+    const r = vec3.length(pos);
+    if (r > 0.0001) {
+      const dir = vec3.scale(vec3.create(), pos, -1 / r); // от света к центру (0,0,0)
+      this.spotYaw = Math.atan2(dir[0], dir[2]);
+      this.spotPitch = Math.asin(dir[1]);
+    } else {
+      this.spotYaw = 0;
+      this.spotPitch = -Math.PI / 4.0;
+    }
+  }
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -170,9 +232,12 @@ export class Renderer {
     this.createGrid();
     this.createLightSphere();
     this.createAxisGizmo();
+    this.createDefaultTextures();
     this.createUniforms();
+    this.recreateBindGroups();
     this.updateViewProj();
     this.updateLightViewProj();
+    this.initSpotOrientationFromPosition();
 
     // Обработка мыши для выбора и перетаскивания
     this.canvas.addEventListener('mousedown', (e) => {
@@ -193,7 +258,6 @@ export class Renderer {
             vec3.copy(this.objectDragStartPos, this.objectPos);
           } else {
             this.isDraggingLight = true;
-            // стартовая позиция света
             vec3.copy(this.lightDragStartHit, this.lightDir);
           }
 
@@ -202,15 +266,28 @@ export class Renderer {
           e.stopPropagation();
           return;
         }
+
+        // Если выбран свет, НЕ попали по оси и режим = SPOT → вращаем прожектор вокруг себя
+        if (this.selection === 'light' && this.lightMode === 'spot') {
+          this.isRotatingLight = true;
+          this.rotateStartMouseX = e.clientX;
+          this.rotateStartMouseY = e.clientY;
+          this.rotateStartYaw = this.spotYaw;
+          this.rotateStartPitch = this.spotPitch;
+
+          this.canvas.style.cursor = 'move';
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
       }
 
-      // Иначе — просто выбор объекта/света (вращение делает Arcball)
+      // Иначе — просто выбор объекта/света
       this.handleSelectionClick(e.clientX, e.clientY);
     });
 
     this.canvas.addEventListener('mousemove', (e) => {
       if (this.isDraggingObject && this.dragAxisIndex !== -1) {
-        const rect = this.canvas.getBoundingClientRect();
         const dx = e.clientX - this.dragStartMouseX;
         const dy = e.clientY - this.dragStartMouseY;
 
@@ -231,7 +308,6 @@ export class Renderer {
         );
         vec3.copy(this.objectPos, newPos);
       } else if (this.isDraggingLight && this.dragAxisIndex !== -1) {
-        const rect = this.canvas.getBoundingClientRect();
         const dx = e.clientX - this.dragStartMouseX;
         const dy = e.clientY - this.dragStartMouseY;
 
@@ -254,13 +330,25 @@ export class Renderer {
 
         vec3.copy(this.lightDir, newPos); // lightDir теперь = позиция света
         this.updateLightViewProj();
+      } else if (this.isRotatingLight) {
+        const dx = e.clientX - this.rotateStartMouseX;
+        const dy = e.clientY - this.rotateStartMouseY;
+
+        const rotSpeed = 0.005;
+        this.spotYaw = this.rotateStartYaw + dx * rotSpeed;
+
+        const maxPitch = Math.PI / 2 - 0.1;
+        const minPitch = -maxPitch;
+        const newPitch = this.rotateStartPitch - dy * rotSpeed;
+        this.spotPitch = Math.max(minPitch, Math.min(maxPitch, newPitch));
       }
     });
 
     this.canvas.addEventListener('mouseup', () => {
-      if (this.isDraggingObject || this.isDraggingLight) {
+      if (this.isDraggingObject || this.isDraggingLight || this.isRotatingLight) {
         this.isDraggingObject = false;
         this.isDraggingLight = false;
+        this.isRotatingLight = false;
         this.dragAxisIndex = -1;
         this.canvas.style.cursor = 'default';
       }
@@ -296,24 +384,41 @@ export class Renderer {
     vec3.normalize(rayDir, rayDir);
     const rayOrigin = this.cameraController.getCameraPosition();
 
-    // 1) Объект
+    const objectCenter = this.objectPos;
     const objectRadius = 1.5;
-    if (this.raySphereIntersect(rayOrigin, rayDir, this.objectPos, objectRadius)) {
-      this.setSelection('object');
+
+    const lightCenter = this.lightDir; // позиция света
+    const lightRadius = 1.2;
+
+    const tObj = this.raySphereHit(rayOrigin, rayDir, objectCenter, objectRadius);
+    const tLight = this.raySphereHit(rayOrigin, rayDir, lightCenter, lightRadius);
+
+    const hasObj = tObj < Number.POSITIVE_INFINITY;
+    const hasLight = tLight < Number.POSITIVE_INFINITY;
+
+    if (!hasObj && !hasLight) {
+      this.setSelection('none');
       return;
     }
 
-    // 2) Свет (сфера)
-    const lightPos = vec3.clone(this.lightDir);
-    const lightRadius = 1.2;
+    if (hasObj && hasLight) {
+      if (tLight < tObj) {
+        this.setSelection('light');
+      } else {
+        this.setSelection('object');
+      }
+      return;
+    }
 
-    if (this.raySphereIntersect(rayOrigin, rayDir, lightPos, lightRadius)) {
+    if (hasLight) {
       this.setSelection('light');
       return;
     }
 
-    // 3) Ничего
-    this.setSelection('none');
+    if (hasObj) {
+      this.setSelection('object');
+      return;
+    }
   }
 
   private pickAxisHit(clientX: number, clientY: number): number {
@@ -402,47 +507,25 @@ export class Renderer {
     return bestAxis;
   }
 
-  private raySphereIntersect(origin: vec3, dir: vec3, center: vec3, radius: number): boolean {
-    // Решаем |O + tD - C|^2 = R^2
+  // Возвращает расстояние t до ближайшего пересечения луча со сферой
+  // или Infinity, если пересечений нет.
+  private raySphereHit(origin: vec3, dir: vec3, center: vec3, radius: number): number {
     const oc = vec3.subtract(vec3.create(), origin, center);
-    const a = vec3.dot(dir, dir);
+    const a = vec3.dot(dir, dir); // для нормализованного dir = 1
     const b = 2 * vec3.dot(oc, dir);
     const c = vec3.dot(oc, oc) - radius * radius;
     const discriminant = b * b - 4 * a * c;
-    if (discriminant < 0) return false;
-    const t1 = (-b - Math.sqrt(discriminant)) / (2 * a);
-    const t2 = (-b + Math.sqrt(discriminant)) / (2 * a);
-    return t1 >= 0 || t2 >= 0;
-  }
+    if (discriminant < 0) return Number.POSITIVE_INFINITY;
 
-  private screenToWorldOnPlane(clientX: number, clientY: number, planeY: number): vec3 | null {
-    const rect = this.canvas.getBoundingClientRect();
-    const x = ((clientX - rect.left) / rect.width) * 2 - 1;
-    const y = 1 - ((clientY - rect.top) / rect.height) * 2;
+    const sqrtD = Math.sqrt(discriminant);
+    const t0 = (-b - sqrtD) / (2 * a);
+    const t1 = (-b + sqrtD) / (2 * a);
 
-    const invViewProj = mat4.invert(mat4.create(), this.viewProj);
-    if (!invViewProj) return null;
+    let t = Number.POSITIVE_INFINITY;
+    if (t0 >= 0 && t0 < t) t = t0;
+    if (t1 >= 0 && t1 < t) t = t1;
 
-    const nearPoint = vec3.fromValues(x, y, -1);
-    const farPoint = vec3.fromValues(x, y, 1);
-
-    const worldNear = vec3.transformMat4(vec3.create(), nearPoint, invViewProj);
-    const worldFar = vec3.transformMat4(vec3.create(), farPoint, invViewProj);
-
-    const rayDir = vec3.subtract(vec3.create(), worldFar, worldNear);
-    vec3.normalize(rayDir, rayDir);
-
-    const rayOrigin = this.cameraController.getCameraPosition();
-
-    const denom = rayDir[1];
-    if (Math.abs(denom) < 1e-4) return null;
-
-    const t = (planeY - rayOrigin[1]) / denom;
-    if (t <= 0) return null;
-
-    const hit = vec3.create();
-    vec3.scaleAndAdd(hit, rayOrigin, rayDir, t);
-    return hit;
+    return t;
   }
 
   private setSelection(sel: Selection) {
@@ -514,9 +597,14 @@ export class Renderer {
     console.log('✓ Shadow pipeline created');
 
     const vertexBuffers: GPUVertexBufferLayout[] = [
+      // position
       { arrayStride: 3 * 4, attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }] },
-      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 1, format: 'float32x3', offset: 0 }] }
+      // normal
+      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 1, format: 'float32x3', offset: 0 }] },
+      // uv
+      { arrayStride: 2 * 4, attributes: [{ shaderLocation: 2, format: 'float32x2', offset: 0 }] }
     ];
+
 
     const smModule = device.createShaderModule({ code: basicWGSL });
     this.pipelineSM = device.createRenderPipeline({
@@ -587,7 +675,8 @@ export class Renderer {
     const gridSolidModule = device.createShaderModule({ code: gridSolidWGSL });
     const gridBuffers: GPUVertexBufferLayout[] = [
       { arrayStride: 3 * 4, attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }] },
-      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 1, format: 'float32x3', offset: 0 }] }
+      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 1, format: 'float32x3', offset: 0 }] },
+      { arrayStride: 2 * 4, attributes: [{ shaderLocation: 2, format: 'float32x2', offset: 0 }] }
     ];
     this.gridPipeline = device.createRenderPipeline({
       layout: 'auto',
@@ -620,7 +709,7 @@ export class Renderer {
     });
     console.log('✓ Grid pipeline created');
 
-    // Light sphere pipeline (unlit)
+    // Light visual pipeline (unlit, always on top)
     const lightSphereModule = device.createShaderModule({ code: lightSphereWGSL });
     const spherePosLayout: GPUVertexBufferLayout = {
       arrayStride: 3 * 4,
@@ -634,13 +723,10 @@ export class Renderer {
         entryPoint: 'fs_main',
         targets: [{ format }]
       },
-      primitive: { topology: 'triangle-list', cullMode: 'back' },
-      depthStencil: {
-        format: 'depth24plus',
-        depthWriteEnabled: true,
-        depthCompare: 'less'
-      }
+      primitive: { topology: 'triangle-list', cullMode: 'back' }
+      // depthStencil не указываем → рисуем поверх всего
     });
+
     // Axis gizmo pipeline (lines)
     const axisModule = device.createShaderModule({ code: axisGizmoWGSL });
     const axisBufferLayout: GPUVertexBufferLayout = {
@@ -703,25 +789,51 @@ export class Renderer {
     const { device } = this.gpu;
     const positions = new Float32Array([
       // Куб 2x2x2 (от -1 до 1)
-      -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1,
-      -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1, -1,
-      1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1,
-      -1, -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1,
-      -1, 1, 1, 1, 1, 1, 1, 1, -1, -1, 1, -1,
-      -1, -1, 1, -1, -1, -1, 1, -1, -1, 1, -1, 1,
+      -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1, // front
+      -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1, -1, // back
+      1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, // right
+      -1, -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1, // left
+      -1, 1, 1, 1, 1, 1, 1, 1, -1, -1, 1, -1, // top
+      -1, -1, 1, -1, -1, -1, 1, -1, -1, 1, -1, 1, // bottom
     ]);
     const normals = new Float32Array([
+      // front
       0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
+      // back
       0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1,
+      // right
       1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
+      // left
       -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
+      // top
       0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
+      // bottom
       0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0,
     ]);
-    // indices не меняются
+
+    // Простейшая развёртка: каждый quad 0..1
+    const uvs = new Float32Array([
+      // front
+      0, 0, 1, 0, 1, 1, 0, 1,
+      // back
+      0, 0, 0, 1, 1, 1, 1, 0,
+      // right
+      0, 0, 1, 0, 1, 1, 0, 1,
+      // left
+      0, 0, 1, 0, 1, 1, 0, 1,
+      // top
+      0, 0, 1, 0, 1, 1, 0, 1,
+      // bottom
+      0, 0, 0, 1, 1, 1, 1, 0,
+    ]);
+
     const indices = new Uint16Array([
-      0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11,
-      12, 13, 14, 12, 14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23,
+      0, 1, 2, 0, 2, 3,    // front
+      4, 5, 6, 4, 6, 7,    // back
+      8, 9, 10, 8, 10, 11,    // right
+      12, 13, 14, 12, 14, 15,   // left
+      16, 17, 18, 16, 18, 19,   // top
+      20, 21, 22, 20, 22, 23,   // bottom
     ]);
     this.indexCount = indices.length;
 
@@ -730,6 +842,9 @@ export class Renderer {
 
     this.nbo = device.createBuffer({ size: normals.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(this.nbo, 0, normals);
+
+    this.tbo = device.createBuffer({ size: uvs.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(this.tbo, 0, uvs);
 
     this.ibo = device.createBuffer({ size: indices.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(this.ibo, 0, indices);
@@ -749,6 +864,11 @@ export class Renderer {
       0, 1, 0, 0, 1, 0, 0, 1, 0
     ]);
 
+    const gridUV = new Float32Array([
+      0, 0, 5, 0, 5, 5,
+      0, 0, 5, 5, 0, 5
+    ]);
+
     this.gridVBO = device.createBuffer({
       size: gridPos.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
@@ -760,28 +880,132 @@ export class Renderer {
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
     });
     device.queue.writeBuffer(this.gridNBO, 0, gridNorm);
+
+    this.gridTBO = device.createBuffer({
+      size: gridUV.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(this.gridTBO, 0, gridUV);
   }
 
   private createLightSphere() {
     const { device } = this.gpu;
 
-    // Генерируем icosphere радиус 0.3, 1 subdivision
+    // 1) Sun: icosphere
     const sphere = SphereGenerator.createIcosphere(0.4, 1);
-    this.lightSphereIndexCount = sphere.indices.length;
+    this.lightSunIndexCount = sphere.indices.length;
 
-    this.lightSphereVBO = device.createBuffer({
+    this.lightSunVBO = device.createBuffer({
       size: sphere.positions.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
     });
-    device.queue.writeBuffer(this.lightSphereVBO, 0, sphere.positions.buffer);
+    device.queue.writeBuffer(this.lightSunVBO, 0, sphere.positions.buffer);
 
-    this.lightSphereIBO = device.createBuffer({
+    this.lightSunIBO = device.createBuffer({
       size: sphere.indices.byteLength,
       usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
     });
-    device.queue.writeBuffer(this.lightSphereIBO, 0, sphere.indices.buffer);
+    device.queue.writeBuffer(this.lightSunIBO, 0, sphere.indices.buffer);
 
-    console.log('✓ Light sphere geometry created');
+    // 2) Spot: простой конус вдоль +Y (основание внизу, вершина вверху)
+    const coneSegments = 16;
+    const coneVerts: number[] = [];
+    const coneIndices: number[] = [];
+
+    const coneRadius = 0.5;
+    const coneHeight = 1.0;
+    const tipY = coneHeight * 0.5;
+    const baseY = -coneHeight * 0.5;
+
+    // Вершина конуса
+    coneVerts.push(0, tipY, 0);
+
+    // Кольцо основания
+    for (let i = 0; i < coneSegments; i++) {
+      const a = (i / coneSegments) * Math.PI * 2;
+      const x = Math.cos(a) * coneRadius;
+      const z = Math.sin(a) * coneRadius;
+      coneVerts.push(x, baseY, z);
+    }
+
+    // Треугольники боковой поверхности
+    for (let i = 0; i < coneSegments; i++) {
+      const i0 = 0;                     // tip
+      const i1 = 1 + i;                 // текущая точка основания
+      const i2 = 1 + ((i + 1) % coneSegments); // следующая точка основания
+      coneIndices.push(i0, i1, i2);
+    }
+
+    this.lightSpotIndexCount = coneIndices.length;
+
+    this.lightSpotVBO = device.createBuffer({
+      size: coneVerts.length * 4,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(this.lightSpotVBO, 0, new Float32Array(coneVerts));
+
+    this.lightSpotIBO = device.createBuffer({
+      size: coneIndices.length * 2,
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(this.lightSpotIBO, 0, new Uint16Array(coneIndices));
+
+    // 3) Top: обратный конус вдоль -Y (остриём вниз)
+    const topSegments = 16;
+    const topVerts: number[] = [];
+    const topIndices: number[] = [];
+
+    const topRadius = 0.5;
+    const topHeight = 1.0;
+    const topTipY = -topHeight * 0.5;   // остриё внизу
+    const topBaseY = topHeight * 0.5;   // основание наверху
+
+    // Вершина (остриё) конуса сверху вниз (index 0)
+    topVerts.push(0, topTipY, 0);
+
+    // Кольцо основания (index 1..topSegments)
+    for (let i = 0; i < topSegments; i++) {
+      const a = (i / topSegments) * Math.PI * 2;
+      const x = Math.cos(a) * topRadius;
+      const z = Math.sin(a) * topRadius;
+      topVerts.push(x, topBaseY, z);
+    }
+
+    // Центр основания (index = 1 + topSegments)
+    const baseCenterIndex = 1 + topSegments;
+    topVerts.push(0, topBaseY, 0);
+
+    // Боковая поверхность
+    for (let i = 0; i < topSegments; i++) {
+      const i0 = 0;                           // tip
+      const i1 = 1 + i;                       // текущая точка основания
+      const i2 = 1 + ((i + 1) % topSegments); // следующая точка основания
+      topIndices.push(i0, i1, i2);
+    }
+
+    // Донышко (основание) — веер из треугольников
+    for (let i = 0; i < topSegments; i++) {
+      const i1 = 1 + i;
+      const i2 = 1 + ((i + 1) % topSegments);
+      // порядок вершин выбираем так, чтобы нормаль смотрела наружу (вверх)
+      topIndices.push(baseCenterIndex, i2, i1);
+    }
+
+    this.lightTopIndexCount = topIndices.length;
+
+    this.lightTopVBO = device.createBuffer({
+      size: topVerts.length * 4,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(this.lightTopVBO, 0, new Float32Array(topVerts));
+
+    this.lightTopIBO = device.createBuffer({
+      size: topIndices.length * 2,
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(this.lightTopIBO, 0, new Uint16Array(topIndices));
+
+    console.log('✓ Light meshes (sun/spot/top) created');
   }
 
   private createAxisGizmo() {
@@ -865,7 +1089,10 @@ export class Renderer {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
 
-    this.recreateBindGroups();
+    this.shadingBuf = device.createBuffer({
+      size: 16, // один vec4<f32>
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
   }
 
   private recreateBindGroups() {
@@ -951,8 +1178,73 @@ export class Renderer {
       entries: [{ binding: 0, resource: { buffer: this.axisUniformBuf } }]
     });
 
+    // Shading params for main object (group 3) — для текущего метода
+    this.shadingBindGroupMain = device.createBindGroup({
+      layout: currentPipeline.getBindGroupLayout(3),
+      entries: [{ binding: 0, resource: { buffer: this.shadingBuf } }]
+    });
+
+    // Shading params for grid (group 3)
+    this.shadingBindGroupGrid = device.createBindGroup({
+      layout: this.gridPipeline.getBindGroupLayout(3),
+      entries: [{ binding: 0, resource: { buffer: this.shadingBuf } }]
+    });
+
+    // Object texture bind group (group = 2) — теперь есть во всех методах
+    this.objTexBindGroup = device.createBindGroup({
+      layout: currentPipeline.getBindGroupLayout(2),
+      entries: [
+        { binding: 0, resource: this.objTextureView },
+        { binding: 1, resource: this.objSampler }
+      ]
+    });
+
+    // Floor texture bind group (grid pipeline group = 2)
+    this.floorTexBindGroup = device.createBindGroup({
+      layout: this.gridPipeline.getBindGroupLayout(2),
+      entries: [
+        { binding: 0, resource: this.floorTextureView },
+        { binding: 1, resource: this.floorSampler }
+      ]
+    });
   }
 
+  private createDefaultTextures() {
+    const { device } = this.gpu;
+
+    const createSolidTex = (r: number, g: number, b: number): [GPUTexture, GPUTextureView] => {
+      const tex = device.createTexture({
+        size: [1, 1],
+        format: 'rgba8unorm',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+      });
+      const data = new Uint8Array([r, g, b, 255]);
+      device.queue.writeTexture(
+        { texture: tex },
+        data,
+        { bytesPerRow: 4 },
+        { width: 1, height: 1 }
+      );
+      return [tex, tex.createView()];
+    };
+
+    [this.objTexture, this.objTextureView] = createSolidTex(200, 200, 200);
+    [this.floorTexture, this.floorTextureView] = createSolidTex(120, 120, 120);
+
+    this.objSampler = device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+      addressModeU: 'repeat',
+      addressModeV: 'repeat'
+    });
+
+    this.floorSampler = device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+      addressModeU: 'repeat',
+      addressModeV: 'repeat'
+    });
+  }
 
   private updateViewProj() {
     const aspect = this.canvas.width / this.canvas.height;
@@ -988,6 +1280,50 @@ export class Renderer {
     mat4.multiply(this.lightViewProj, lightProj, lightView);
   }
 
+  async loadObjectTexture(file: File) {
+    const { device } = this.gpu;
+    const bitmap = await createImageBitmap(file);
+
+    if (this.objTexture) this.objTexture.destroy();
+
+    this.objTexture = device.createTexture({
+      size: [bitmap.width, bitmap.height],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    });
+
+    device.queue.copyExternalImageToTexture(
+      { source: bitmap },
+      { texture: this.objTexture },
+      { width: bitmap.width, height: bitmap.height }
+    );
+
+    this.objTextureView = this.objTexture.createView();
+    this.recreateBindGroups();
+  }
+
+  async loadFloorTexture(file: File) {
+    const { device } = this.gpu;
+    const bitmap = await createImageBitmap(file);
+
+    if (this.floorTexture) this.floorTexture.destroy();
+
+    this.floorTexture = device.createTexture({
+      size: [bitmap.width, bitmap.height],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    });
+
+    device.queue.copyExternalImageToTexture(
+      { source: bitmap },
+      { texture: this.floorTexture },
+      { width: bitmap.width, height: bitmap.height }
+    );
+
+    this.floorTextureView = this.floorTexture.createView();
+    this.recreateBindGroups();
+  }
+
   start() {
     const loop = () => {
       this.rafId = requestAnimationFrame(loop);
@@ -1010,14 +1346,14 @@ export class Renderer {
     if (this.nbo) this.nbo.destroy();
     if (this.ibo) this.ibo.destroy();
     if (this.uniformBuf) this.uniformBuf.destroy();
-    if (this.lightSphereVBO) this.lightSphereVBO.destroy();
-    if (this.lightSphereIBO) this.lightSphereIBO.destroy();
     if (this.axisVBO) this.axisVBO.destroy();
     if (this.axisIBO) this.axisIBO.destroy();
     if (this.axisUniformBuf) this.axisUniformBuf.destroy();
+    if (this.shadingBuf) this.shadingBuf.destroy();
+    if (this.tbo) this.tbo.destroy();
+    if (this.gridTBO) this.gridTBO.destroy();
     console.log('✓ Renderer destroyed');
   }
-
 
   private frame() {
     const { device, context } = this.gpu;
@@ -1035,6 +1371,18 @@ export class Renderer {
         this.fpsCallback(this.currentFps);
       }
     }
+
+    // Определяем индекс режима света
+    const lightModeIndex = this.getLightModeIndex();
+
+    // Обновляем буфер настроек шейдинга:
+    // [ shadowStrength, lightModeIndex, spotYaw, spotPitch ]
+    const shadingData = new Float32Array(4);
+    shadingData[0] = this.shadowStrength;     // 0..2
+    shadingData[1] = lightModeIndex;          // 0,1,2  (sun/spot/top)
+    shadingData[2] = this.spotYaw;            // ориентация прожектора
+    shadingData[3] = this.spotPitch;
+    device.queue.writeBuffer(this.shadingBuf, 0, shadingData.buffer);
 
     this.cameraController.update(deltaTime);
     this.updateViewProj();
@@ -1063,6 +1411,7 @@ export class Renderer {
     ], 48);
 
     if (this.shadowParams.method === 'PCSS') {
+      // PCSS оставляем как было
       tmp.set([
         this.shadowParams.bias,
         this.shadowParams.pcssLightSize,
@@ -1070,13 +1419,23 @@ export class Renderer {
         this.shadowParams.shadowMapSize
       ], 52);
     } else if (this.shadowParams.method === 'VSM') {
+      // VSM тоже без изменений
       tmp.set([
         this.shadowParams.vsmMinVariance,
         this.shadowParams.vsmLightBleedReduction,
         0,
         0
       ], 52);
+    } else if (this.shadowParams.method === 'SM') {
+      // Для SM: [bias, lightModeIndex, spotYaw, spotPitch]
+      tmp.set([
+        this.shadowParams.bias,
+        lightModeIndex,
+        this.spotYaw,
+        this.spotPitch
+      ], 52);
     } else {
+      // PCF — оставляем старую упаковку (радиус, сэмплы, размер карты)
       tmp.set([
         this.shadowParams.bias,
         this.shadowParams.pcfRadius,
@@ -1189,8 +1548,17 @@ export class Renderer {
     mainPass.setVertexBuffer(0, this.vbo);
     mainPass.setVertexBuffer(1, this.nbo);
     mainPass.setIndexBuffer(this.ibo, 'uint16');
+    mainPass.setVertexBuffer(0, this.vbo);
+    mainPass.setVertexBuffer(1, this.nbo);
+    mainPass.setVertexBuffer(2, this.tbo);
     mainPass.setBindGroup(0, this.bindGroup0Main);
     mainPass.setBindGroup(1, this.bindGroup1Main);
+    mainPass.setBindGroup(2, this.objTexBindGroup);
+
+    if (this.shadingBindGroupMain) {
+      mainPass.setBindGroup(3, this.shadingBindGroupMain);
+    }
+
     mainPass.drawIndexed(this.indexCount);
     mainPass.end();
 
@@ -1210,29 +1578,48 @@ export class Renderer {
     gridPass.setPipeline(this.gridPipeline);
     gridPass.setVertexBuffer(0, this.gridVBO);
     gridPass.setVertexBuffer(1, this.gridNBO);
+    gridPass.setVertexBuffer(2, this.gridTBO);
     gridPass.setBindGroup(0, this.gridBindGroup);
     gridPass.setBindGroup(1, this.gridBindGroup1);
+    gridPass.setBindGroup(2, this.floorTexBindGroup);
+    gridPass.setBindGroup(3, this.shadingBindGroupGrid);
     gridPass.draw(6);
     gridPass.end();
 
     // Light sphere pass (рендерим последним поверх всего)
+    // Light visual pass (sun / spot / top)
     const spherePass = encoder.beginRenderPass({
       colorAttachments: [{
         view: context.getCurrentTexture().createView(),
         loadOp: 'load',
         storeOp: 'store'
-      }],
-      depthStencilAttachment: {
-        view: this.depthView,
-        depthLoadOp: 'load',
-        depthStoreOp: 'store'
-      }
+      }]
     });
+
     spherePass.setPipeline(this.lightSpherePipeline);
-    spherePass.setVertexBuffer(0, this.lightSphereVBO);
-    spherePass.setIndexBuffer(this.lightSphereIBO, 'uint16');
     spherePass.setBindGroup(0, this.lightSphereBindGroup);
-    spherePass.drawIndexed(this.lightSphereIndexCount);
+
+    let vbo: GPUBuffer;
+    let ibo: GPUBuffer;
+    let count = 0;
+
+    if (this.lightMode === 'sun') {
+      vbo = this.lightSunVBO;
+      ibo = this.lightSunIBO;
+      count = this.lightSunIndexCount;
+    } else if (this.lightMode === 'spot') {
+      vbo = this.lightSpotVBO;
+      ibo = this.lightSpotIBO;
+      count = this.lightSpotIndexCount;
+    } else {
+      vbo = this.lightTopVBO;
+      ibo = this.lightTopIBO;
+      count = this.lightTopIndexCount;
+    }
+
+    spherePass.setVertexBuffer(0, vbo);
+    spherePass.setIndexBuffer(ibo, 'uint16');
+    spherePass.drawIndexed(count);
     spherePass.end();
 
     // Axis gizmo pass (если выбран объект ИЛИ свет)
@@ -1265,6 +1652,7 @@ export class Renderer {
     pcssBlockerSearchSamples?: number;
     vsmMinVariance?: number;
     vsmLightBleedReduction?: number;
+    shadowStrength?: number;
   }) {
     const methodChanged = params.method !== this.shadowParams.method;
     const sizeChanged = params.shadowMapSize !== this.shadowSize;
@@ -1278,8 +1666,10 @@ export class Renderer {
       pcssLightSize: params.pcssLightSize ?? this.shadowParams.pcssLightSize,
       pcssBlockerSearchSamples: params.pcssBlockerSearchSamples ?? this.shadowParams.pcssBlockerSearchSamples,
       vsmMinVariance: params.vsmMinVariance ?? this.shadowParams.vsmMinVariance,
-      vsmLightBleedReduction: params.vsmLightBleedReduction ?? this.shadowParams.vsmLightBleedReduction
+      vsmLightBleedReduction: params.vsmLightBleedReduction ?? this.shadowParams.vsmLightBleedReduction,
+      shadowStrength: params.shadowStrength ?? this.shadowParams.shadowStrength
     };
+    this.shadowStrength = this.shadowParams.shadowStrength ?? 1.0;
 
     // Пересоздаём ресурсы если изменился размер
     if (sizeChanged) {
@@ -1303,6 +1693,12 @@ export class Renderer {
     // Сбрасываем свет
     this.lightDir = vec3.fromValues(5, 10, 3);
     this.updateLightViewProj();
+    this.initSpotOrientationFromPosition();
+
+    // Сбрасываем тип света и силу теней
+    this.lightMode = 'sun';
+    this.shadowParams.shadowStrength = 1.0;
+    this.shadowStrength = 1.0;
 
     // Сбрасываем вращение объекта
     this.arcball.reset();
@@ -1315,7 +1711,7 @@ export class Renderer {
     this.dragAxisIndex = -1;
     this.canvas.style.cursor = 'default';
 
-    console.log('✓ Scene reset to defaults (camera/light/object)');
+    console.log('✓ Scene reset to defaults (camera/light/object/light/shadows)');
   }
 
   resetModel() {
