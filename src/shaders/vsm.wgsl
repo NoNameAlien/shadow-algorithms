@@ -37,6 +37,10 @@ struct ShadingParams {
   lightMode: f32,
   spotYaw: f32,
   spotPitch: f32,
+  methodIndex: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
 };
 
 @group(3) @binding(0) var<uniform> shading: ShadingParams;
@@ -107,7 +111,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   var lambert: f32;
 
   if (mode == LIGHT_MODE_TOP) {
-    L = normalize(vec3<f32>(0.0, -1.0, 0.0));
+    L = normalize(vec3<f32>(0.0, 1.0, 0.0));
     lambert = max(dot(N, L), 0.0);
   } else if (mode == LIGHT_MODE_SPOT) {
     let yaw = shading.spotYaw;

@@ -45,7 +45,7 @@ export class ArcballController {
         this.canvas.addEventListener('mouseup', () => {
             this.isDragging = false;
             this.state = 'paused';
-            this.pauseEndTime = performance.now() + 3000;
+            this.pauseEndTime = performance.now() + 2000;
             this.canvas.style.cursor = 'default';
         });
     }

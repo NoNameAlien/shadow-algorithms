@@ -13,6 +13,8 @@ type Props = {
     onLoadFloorTexture?: (file: File) => void;
     lang: 'en' | 'ru';
     onLanguageChange: (lang: 'en' | 'ru') => void;
+    autoRotate: boolean;
+    onToggleAutoRotate: () => void;
 };
 
 const INITIAL_PARAMS: ShadowParams = {
@@ -104,7 +106,9 @@ export function ControlPanel({
     lightMode,
     onLightModeChange,
     lang,
-    onLanguageChange
+    onLanguageChange,
+    autoRotate,
+    onToggleAutoRotate
 }: Props) {
     const [params, setParams] = useState<ShadowParams>(INITIAL_PARAMS);
     const [modelName, setModelName] = useState<string | null>(null);
@@ -172,7 +176,29 @@ export function ControlPanel({
                     </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: 4 }}>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    {/* Кнопка паузы авто‑вращения */}
+                    <button
+                        type="button"
+                        onClick={onToggleAutoRotate}
+                        style={{
+                            padding: '3px 8px',
+                            fontSize: 13,
+                            borderRadius: 999,
+                            border: '1px solid #333948',
+                            background: autoRotate ? '#202531' : '#2f9e44',
+                            color: '#e6e6e6',
+                            cursor: 'pointer'
+                        }}
+                        title={
+                            lang === 'ru'
+                                ? (autoRotate ? 'Поставить вращение на паузу' : 'Возобновить вращение объекта')
+                                : (autoRotate ? 'Pause object rotation' : 'Resume object rotation')
+                        }
+                    >
+                        {autoRotate ? '⏸' : '▶'}
+                    </button>
+
                     <button
                         type="button"
                         onClick={() => onLanguageChange('en')}
@@ -641,6 +667,7 @@ export function ControlPanel({
                     setParams(INITIAL_PARAMS);
                     onParamsChange(INITIAL_PARAMS);
                     onLightModeChange('sun');
+                    if (!autoRotate) onToggleAutoRotate(); // вернуть вращение
                     onResetScene?.();
                     onResetModel?.();
                     setModelName(null);
@@ -735,7 +762,7 @@ export function ControlPanel({
                     textAlign: 'right'
                 }}
             >
-                {t.fpsLabel}: {fps}
+                {t.fpsLabel}: {Math.min(120, fps)}
             </div>
         </div>
     );

@@ -37,10 +37,24 @@ struct ShadingParams {
   lightMode: f32,
   spotYaw: f32,
   spotPitch: f32,
+  methodIndex: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
 };
 
-@group(3) @binding(0) var<uniform> shading: ShadingParams;
+const POISSON_16: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
+  vec2<f32>(-0.613, 0.354), vec2<f32>(0.743, -0.125),
+  vec2<f32>(-0.212, -0.532), vec2<f32>(0.124, 0.987),
+  vec2<f32>(-0.945, -0.123), vec2<f32>(0.432, 0.456),
+  vec2<f32>(-0.321, 0.765), vec2<f32>(0.876, 0.321),
+  vec2<f32>(-0.111, -0.987), vec2<f32>(0.234, -0.654),
+  vec2<f32>(-0.765, 0.111), vec2<f32>(0.567, -0.876),
+  vec2<f32>(-0.456, -0.234), vec2<f32>(0.789, 0.654),
+  vec2<f32>(-0.888, 0.444), vec2<f32>(0.111, -0.111),
+);
 
+@group(3) @binding(0) var<uniform> shading: ShadingParams;
 
 @vertex
 fn vs_main(input: VSIn) -> VSOut {
@@ -53,22 +67,61 @@ fn vs_main(input: VSIn) -> VSOut {
   return out;
 }
 
-fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
+fn shadowVisibilityFloor(lightSpacePos: vec4<f32>) -> f32 {
   let ndc = lightSpacePos.xyz / lightSpacePos.w;
   let uv = vec2<f32>(
     ndc.x * 0.5 + 0.5,
     1.0 - (ndc.y * 0.5 + 0.5)
   );
-  let depth = ndc.z;
+  // bias храним в u.shadowParams.x для SM/PCF/PCSS
+  let depth = ndc.z - u.shadowParams.x;
 
-  let inBounds = ndc.x >= -1.0 && ndc.x <= 1.0 && 
-                 ndc.y >= -1.0 && ndc.y <= 1.0 && 
+  let inBounds = ndc.x >= -1.0 && ndc.x <= 1.0 &&
+                 ndc.y >= -1.0 && ndc.y <= 1.0 &&
                  ndc.z >= 0.0 && ndc.z <= 1.0;
-  
-  let shadow = textureSampleCompare(shadowMap, shadowSampler, uv, depth);
+
+  // Индекс метода: 0=SM,1=PCF,2=PCSS,3=VSM
+  let method = i32(round(shading.methodIndex));
+
+  var radius: f32;
+  var samples: i32;
+  var invSize: f32;
+
+  if (method == 1) {
+    // PCF: радиус и количество сэмплов из параметров
+    radius = u.shadowParams.y;                // pcfRadius
+    samples = i32(u.shadowParams.z);         // pcfSamples
+    invSize = 1.0 / max(u.shadowParams.w, 1.0); // shadowMapSize
+  } else if (method == 2) {
+    // PCSS: используем lightSize как эффективный радиус
+    radius = u.shadowParams.y * 2.0;         // pcssLightSize → ширина
+    samples = 16;
+    invSize = 1.0 / max(u.shadowParams.w, 1.0);
+  } else if (method == 3) {
+    // VSM: для пола пока даём мягкий PCF средней силы
+    radius = 1.5;
+    samples = 16;
+    invSize = 1.0 / 2048.0;
+  } else {
+    // SM: один sample (жёсткие тени)
+    radius = 0.0;
+    samples = 1;
+    invSize = 1.0 / max(u.shadowParams.w, 1.0);
+  }
+
+  let maxSamples = max(1, min(samples, 16));
+
+  var shadow: f32 = 0.0;
+  for (var i = 0; i < 16; i = i + 1) {
+    if (i < maxSamples) {
+      let offset = POISSON_16[i] * radius * invSize;
+      shadow += textureSampleCompare(shadowMap, shadowSampler, uv + offset, depth);
+    }
+  }
+  shadow = shadow / f32(maxSamples);
+
   return select(shadow, 1.0, !inBounds);
 }
-
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
@@ -89,7 +142,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   var lambert: f32;
 
   if (mode == LIGHT_MODE_TOP) {
-    L = normalize(vec3<f32>(0.0, -1.0, 0.0));
+    L = normalize(vec3<f32>(0.0, 1.0, 0.0));
     lambert = max(dot(N, L), 0.0);
   } else if (mode == LIGHT_MODE_SPOT) {
     // Прожектор: направление задаётся yaw/pitch
@@ -120,7 +173,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     lambert = max(dot(N, L), 0.0);
   }
 
-  let rawVisibility = shadowVisibility(input.lightSpacePos);
+  let rawVisibility = shadowVisibilityFloor(input.lightSpacePos);
   
   // Цвет сетки
   let gridColor = vec3<f32>(0.3, 0.35, 0.4);

@@ -12,7 +12,7 @@ export default function App() {
   const [lightMode, setLightMode] = useState<LightMode>('sun');
   type Lang = 'en' | 'ru';
   const [lang, setLang] = useState<Lang>('ru');
-
+  const [autoRotate, setAutoRotate] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -74,6 +74,14 @@ export default function App() {
     }
   };
 
+  const handleToggleAutoRotate = () => {
+    setAutoRotate((prev) => {
+      const next = !prev;
+      rendererRef.current?.setObjectAutoRotate(next);
+      return next;
+    });
+  };
+
   const handleLoadObjectTexture = (file: File) => {
     rendererRef.current?.loadObjectTexture(file);
   };
@@ -98,6 +106,8 @@ export default function App() {
         onLoadFloorTexture={handleLoadFloorTexture}
         lang={lang}
         onLanguageChange={setLang}
+        autoRotate={autoRotate}
+        onToggleAutoRotate={handleToggleAutoRotate}
       />
       {error && (
         <div style={{ position: 'absolute', top: 12, left: 12, padding: 8, background: '#2b2f36', borderRadius: 6, maxWidth: 420 }}>

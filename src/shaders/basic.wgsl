@@ -38,6 +38,10 @@ struct ShadingParams {
   lightMode: f32,
   spotYaw: f32,
   spotPitch: f32,
+  methodIndex: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
 };
 
 @group(3) @binding(0) var<uniform> shading: ShadingParams;

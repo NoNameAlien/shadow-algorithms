@@ -113,6 +113,7 @@ export class Renderer {
   private dragAxisScreenDir = { x: 0, y: 0 }; // направление оси на экране
   private dragStartMouseX = 0;
   private dragStartMouseY = 0;
+  private objectAutoRotate = true;
 
   // Ориентация прожектора (spot) вокруг своей позиции
   private spotYaw = 0;    // вокруг Y
@@ -194,11 +195,24 @@ export class Renderer {
     this.lightMode = mode;
   }
 
+  setObjectAutoRotate(enabled: boolean) {
+    this.objectAutoRotate = enabled;
+  }
+
   private getLightModeIndex(): number {
     switch (this.lightMode) {
       case 'sun': return 0;
       case 'spot': return 1;
       case 'top': return 2;
+    }
+  }
+
+  private getMethodIndex(): number {
+    switch (this.shadowParams.method) {
+      case 'SM': return 0;
+      case 'PCF': return 1;
+      case 'PCSS': return 2;
+      case 'VSM': return 3;
     }
   }
 
@@ -1090,7 +1104,7 @@ export class Renderer {
     });
 
     this.shadingBuf = device.createBuffer({
-      size: 16, // один vec4<f32>
+      size: 32, // два vec4<f32> = 8 float32
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
   }
@@ -1374,21 +1388,27 @@ export class Renderer {
 
     // Определяем индекс режима света
     const lightModeIndex = this.getLightModeIndex();
+    const methodIndex = this.getMethodIndex();
 
     // Обновляем буфер настроек шейдинга:
-    // [ shadowStrength, lightModeIndex, spotYaw, spotPitch ]
-    const shadingData = new Float32Array(4);
+    // [ shadowStrength, lightModeIndex, spotYaw, spotPitch, methodIndex, 0,0,0 ]
+    const shadingData = new Float32Array(8);
     shadingData[0] = this.shadowStrength;     // 0..2
     shadingData[1] = lightModeIndex;          // 0,1,2  (sun/spot/top)
     shadingData[2] = this.spotYaw;            // ориентация прожектора
     shadingData[3] = this.spotPitch;
+    shadingData[4] = methodIndex;             // 0=SM,1=PCF,2=PCSS,3=VSM
+    shadingData[5] = 0;
+    shadingData[6] = 0;
+    shadingData[7] = 0;
     device.queue.writeBuffer(this.shadingBuf, 0, shadingData.buffer);
 
     this.cameraController.update(deltaTime);
     this.updateViewProj();
 
-    // Если тащим объект по оси gizmo — не крутим его
-    const arcballDelta = this.isDraggingObject ? 0 : deltaTime;
+    // Если тащим объект или авто‑вращение выключено — не крутим его
+    const arcballDelta =
+      this.isDraggingObject || !this.objectAutoRotate ? 0 : deltaTime;
     const rotation = this.arcball.update(arcballDelta);
 
     // Собираем модельную матрицу = Translation(objectPos) * Rotation
