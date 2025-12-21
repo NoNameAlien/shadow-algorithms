@@ -554,7 +554,6 @@ export class Renderer {
       console.log('Light selected');
     } else {
       console.log('Selection cleared');
-      this.arcball.resume();
     }
   }
 
@@ -597,20 +596,12 @@ export class Renderer {
   private async createPipelines() {
     const { device, format } = this.gpu;
 
-    const depthModule = device.createShaderModule({ code: depthWGSL });
     const posLayout: GPUVertexBufferLayout = {
       arrayStride: 3 * 4,
       attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }]
     };
-    this.shadowPipeline = device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: depthModule, entryPoint: 'vs_main', buffers: [posLayout] },
-      primitive: { topology: 'triangle-list', cullMode: 'back' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' }
-    });
-    console.log('✓ Shadow pipeline created');
 
-    const vertexBuffers: GPUVertexBufferLayout[] = [
+    const mainVertexBuffers: GPUVertexBufferLayout[] = [
       // position
       { arrayStride: 3 * 4, attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }] },
       // normal
@@ -619,7 +610,36 @@ export class Renderer {
       { arrayStride: 2 * 4, attributes: [{ shaderLocation: 2, format: 'float32x2', offset: 0 }] }
     ];
 
+    const gridVertexBuffers: GPUVertexBufferLayout[] = [
+      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }] },
+      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 1, format: 'float32x3', offset: 0 }] },
+      { arrayStride: 2 * 4, attributes: [{ shaderLocation: 2, format: 'float32x2', offset: 0 }] }
+    ];
 
+    this.createShadowPipeline(device, posLayout);
+    this.createMainPipelines(device, format, mainVertexBuffers);
+    this.createVSMPipelines(device, format, mainVertexBuffers, posLayout);
+    this.createGridPipeline(device, format, gridVertexBuffers);
+    this.createLightAndAxisPipelines(device, format);
+  }
+
+  private createShadowPipeline(device: GPUDevice, posLayout: GPUVertexBufferLayout) {
+    const depthModule = device.createShaderModule({ code: depthWGSL });
+    this.shadowPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: depthModule, entryPoint: 'vs_main', buffers: [posLayout] },
+      primitive: { topology: 'triangle-list', cullMode: 'back' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' }
+    });
+    console.log('✓ Shadow pipeline created');
+  }
+
+  private createMainPipelines(
+    device: GPUDevice,
+    format: GPUTextureFormat,
+    vertexBuffers: GPUVertexBufferLayout[]
+  ) {
+    // SM
     const smModule = device.createShaderModule({ code: basicWGSL });
     this.pipelineSM = device.createRenderPipeline({
       layout: 'auto',
@@ -630,6 +650,7 @@ export class Renderer {
     });
     console.log('✓ SM pipeline created');
 
+    // PCF
     const pcfModule = device.createShaderModule({ code: pcfWGSL });
     this.pipelinePCF = device.createRenderPipeline({
       layout: 'auto',
@@ -640,6 +661,7 @@ export class Renderer {
     });
     console.log('✓ PCF pipeline created');
 
+    // PCSS
     const pcssModule = device.createShaderModule({ code: pcssWGSL });
     this.pipelinePCSS = device.createRenderPipeline({
       layout: 'auto',
@@ -649,8 +671,15 @@ export class Renderer {
       depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' }
     });
     console.log('✓ PCSS pipeline created');
+  }
 
-    // VSM moments pipeline
+  private createVSMPipelines(
+    device: GPUDevice,
+    format: GPUTextureFormat,
+    vertexBuffers: GPUVertexBufferLayout[],
+    posLayout: GPUVertexBufferLayout
+  ) {
+    // VSM moments (запись моментов в rgba16float)
     const vsmMomentsModule = device.createShaderModule({ code: vsmMomentsWGSL });
     this.vsmMomentsPipeline = device.createRenderPipeline({
       layout: 'auto',
@@ -665,8 +694,7 @@ export class Renderer {
     });
     console.log('✓ VSM moments pipeline created');
 
-
-    // VSM shading pipeline
+    // VSM shading
     const vsmModule = device.createShaderModule({ code: vsmWGSL });
     this.pipelineVSM = device.createRenderPipeline({
       layout: 'auto',
@@ -677,21 +705,21 @@ export class Renderer {
     });
     console.log('✓ VSM pipeline created');
 
-    // Blur compute pipelines
+    // Blur (compute)
     const blurModule = device.createShaderModule({ code: vsmBlurWGSL });
     this.blurHorizontalPipeline = device.createComputePipeline({
       layout: 'auto',
       compute: { module: blurModule, entryPoint: 'cs_horizontal' }
     });
-    console.log('✓ Blur pipelines created');
+    console.log('✓ Blur pipeline created');
+  }
 
-    // Grid pipeline с нормалями и shadow mapping
+  private createGridPipeline(
+    device: GPUDevice,
+    format: GPUTextureFormat,
+    gridBuffers: GPUVertexBufferLayout[]
+  ) {
     const gridSolidModule = device.createShaderModule({ code: gridSolidWGSL });
-    const gridBuffers: GPUVertexBufferLayout[] = [
-      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }] },
-      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 1, format: 'float32x3', offset: 0 }] },
-      { arrayStride: 2 * 4, attributes: [{ shaderLocation: 2, format: 'float32x2', offset: 0 }] }
-    ];
     this.gridPipeline = device.createRenderPipeline({
       layout: 'auto',
       vertex: { module: gridSolidModule, entryPoint: 'vs_main', buffers: gridBuffers },
@@ -700,7 +728,7 @@ export class Renderer {
         entryPoint: 'fs_main',
         targets: [{
           format,
-          blend: { // alpha blending для затухания
+          blend: {
             color: {
               srcFactor: 'src-alpha',
               dstFactor: 'one-minus-src-alpha',
@@ -722,8 +750,10 @@ export class Renderer {
       }
     });
     console.log('✓ Grid pipeline created');
+  }
 
-    // Light visual pipeline (unlit, always on top)
+  private createLightAndAxisPipelines(device: GPUDevice, format: GPUTextureFormat) {
+    // Light visual (сфера / конусы)
     const lightSphereModule = device.createShaderModule({ code: lightSphereWGSL });
     const spherePosLayout: GPUVertexBufferLayout = {
       arrayStride: 3 * 4,
@@ -738,10 +768,11 @@ export class Renderer {
         targets: [{ format }]
       },
       primitive: { topology: 'triangle-list', cullMode: 'back' }
-      // depthStencil не указываем → рисуем поверх всего
+      // без depthStencil → рисуем поверх сцены
     });
+    console.log('✓ Light sphere pipeline created');
 
-    // Axis gizmo pipeline (lines)
+    // Axis gizmo (оси/окружность)
     const axisModule = device.createShaderModule({ code: axisGizmoWGSL });
     const axisBufferLayout: GPUVertexBufferLayout = {
       arrayStride: 6 * 4, // 3 pos + 3 color
@@ -759,11 +790,68 @@ export class Renderer {
         entryPoint: 'fs_main',
         targets: [{ format }]
       },
-      primitive: { topology: 'line-list', cullMode: 'none' },
-      // ВАЖНО: без depthStencil → gizmo рисуется поверх всего
+      primitive: { topology: 'line-list', cullMode: 'none' }
+      // без depthStencil → gizmo поверх всего
     });
     console.log('✓ Axis gizmo pipeline created');
-    console.log('✓ Light sphere pipeline created');
+  }
+
+  // Загружает изображение из File и создаёт из него GPU-текстуру RGBA8
+  private async createTextureFromImageFile(file: File): Promise<{ texture: GPUTexture; view: GPUTextureView }> {
+    const { device } = this.gpu;
+
+    // 1) Декодируем файл в <img>
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    URL.revokeObjectURL(url);
+
+    const width = img.width;
+    const height = img.height;
+
+    // 2) Рисуем на canvas и читаем пиксели
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Не удалось создать 2D контекст для загрузки текстуры');
+    }
+
+    // Можно сделать flipY при необходимости: ctx.scale(1, -1); ctx.translate(0, -height);
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const src = imageData.data; // Uint8ClampedArray RGBA
+
+    // 3) Подготавливаем выровненный по 256 байтам буфер
+    const bytesPerPixel = 4;
+    const unpaddedRowSize = width * bytesPerPixel;
+    const paddedRowSize = Math.ceil(unpaddedRowSize / 256) * 256;
+    const dst = new Uint8Array(paddedRowSize * height);
+
+    for (let y = 0; y < height; y++) {
+      const srcOffset = y * unpaddedRowSize;
+      const dstOffset = y * paddedRowSize;
+      dst.set(src.subarray(srcOffset, srcOffset + unpaddedRowSize), dstOffset);
+    }
+
+    // 4) Создаём текстуру и пишем данные
+    const texture = device.createTexture({
+      size: [width, height],
+      format: 'rgba8unorm', // простой UNORM, без sRGB, чтобы исключить артефакты
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    });
+
+    device.queue.writeTexture(
+      { texture },
+      dst,
+      { bytesPerRow: paddedRowSize },
+      { width, height }
+    );
+
+    const view = texture.createView();
+    return { texture, view };
   }
 
   private createVSMResources() {
@@ -1229,7 +1317,7 @@ export class Renderer {
     const createSolidTex = (r: number, g: number, b: number): [GPUTexture, GPUTextureView] => {
       const tex = device.createTexture({
         size: [1, 1],
-        format: 'rgba8unorm',
+        format: 'rgba8unorm',      // БЫЛО 'rgba8unorm-srgb'
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
       });
       const data = new Uint8Array([r, g, b, 255]);
@@ -1295,46 +1383,22 @@ export class Renderer {
   }
 
   async loadObjectTexture(file: File) {
-    const { device } = this.gpu;
-    const bitmap = await createImageBitmap(file);
-
     if (this.objTexture) this.objTexture.destroy();
 
-    this.objTexture = device.createTexture({
-      size: [bitmap.width, bitmap.height],
-      format: 'rgba8unorm',
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-    });
+    const { texture, view } = await this.createTextureFromImageFile(file);
+    this.objTexture = texture;
+    this.objTextureView = view;
 
-    device.queue.copyExternalImageToTexture(
-      { source: bitmap },
-      { texture: this.objTexture },
-      { width: bitmap.width, height: bitmap.height }
-    );
-
-    this.objTextureView = this.objTexture.createView();
     this.recreateBindGroups();
   }
 
   async loadFloorTexture(file: File) {
-    const { device } = this.gpu;
-    const bitmap = await createImageBitmap(file);
-
     if (this.floorTexture) this.floorTexture.destroy();
 
-    this.floorTexture = device.createTexture({
-      size: [bitmap.width, bitmap.height],
-      format: 'rgba8unorm',
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-    });
+    const { texture, view } = await this.createTextureFromImageFile(file);
+    this.floorTexture = texture;
+    this.floorTextureView = view;
 
-    device.queue.copyExternalImageToTexture(
-      { source: bitmap },
-      { texture: this.floorTexture },
-      { width: bitmap.width, height: bitmap.height }
-    );
-
-    this.floorTextureView = this.floorTexture.createView();
     this.recreateBindGroups();
   }
 

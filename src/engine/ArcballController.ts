@@ -1,12 +1,8 @@
 import { quat, vec3, mat4 } from 'gl-matrix';
 
-type RotationState = 'animated' | 'paused' | 'dragging';
-
 export class ArcballController {
     private rotation = quat.create();
     private angularVelocity = vec3.fromValues(0.7, 0.4, 0);
-    private state: RotationState = 'animated';
-    private pauseEndTime = 0;
     private lastMousePos = { x: 0, y: 0 };
     private isDragging = false;
     private canvas: HTMLCanvasElement;
@@ -23,20 +19,24 @@ export class ArcballController {
             if (e.ctrlKey || !this.enabled) return;
 
             this.isDragging = true;
-            this.state = 'dragging';
             this.lastMousePos = { x: e.clientX, y: e.clientY };
             this.canvas.style.cursor = 'grab';
         });
 
         this.canvas.addEventListener('mousemove', (e) => {
-            if (!this.isDragging) return;
+            if (!this.isDragging || !this.enabled) return;
 
             const dx = e.clientX - this.lastMousePos.x;
             const dy = e.clientY - this.lastMousePos.y;
 
             const sensitivity = 0.01;
             const deltaQuat = quat.create();
-            quat.fromEuler(deltaQuat, -dy * sensitivity * 180 / Math.PI, -dx * sensitivity * 180 / Math.PI, 0);
+            quat.fromEuler(
+                deltaQuat,
+                -dy * sensitivity * 180 / Math.PI,
+                -dx * sensitivity * 180 / Math.PI,
+                0
+            );
             quat.multiply(this.rotation, deltaQuat, this.rotation);
 
             this.lastMousePos = { x: e.clientX, y: e.clientY };
@@ -44,28 +44,20 @@ export class ArcballController {
 
         this.canvas.addEventListener('mouseup', () => {
             this.isDragging = false;
-            this.state = 'paused';
-            this.pauseEndTime = performance.now() + 2000;
             this.canvas.style.cursor = 'default';
         });
     }
 
-
     update(deltaTime: number): mat4 {
-        // Если вращение отключено, просто вернуть матрицу из текущего quaternion
+        // Если вращение отключено — просто вернуть матрицу из текущего quaternion
         if (!this.enabled) {
             const matrix = mat4.create();
             mat4.fromQuat(matrix, this.rotation);
             return matrix;
         }
 
-        const now = performance.now();
-
-        if (this.state === 'paused' && now > this.pauseEndTime) {
-            this.state = 'animated';
-        }
-
-        if (this.state === 'animated') {
+        // Авто‑вращение: Renderer сам решает, какой deltaTime передавать (0 или >0)
+        if (deltaTime > 0) {
             const deltaQuat = quat.create();
             const angle = vec3.length(this.angularVelocity) * deltaTime;
             const axis = vec3.normalize(vec3.create(), this.angularVelocity);
@@ -84,13 +76,6 @@ export class ArcballController {
 
     reset() {
         this.rotation = quat.create();
-        this.state = 'animated';
-        this.pauseEndTime = 0;
         console.log('Arcball rotation reset');
-    }
-
-    resume() {
-        this.state = 'animated';
-        this.pauseEndTime = 0;
     }
 }
