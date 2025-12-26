@@ -24,12 +24,21 @@ fn vs_main(input: VSIn) -> VSOut {
 
   let translation = vec3<f32>(u.model[3].x, u.model[3].y, u.model[3].z);
 
-  let worldPos = input.position + translation;
+  var worldPos = input.position + translation;
+
+  let floorY: f32 = -2.5;
+
+  // Для отрицательной части зелёной оси (Y) дотягиваем до пола:
+  // зелёная ось: X=0, Z=0; низ оси — vertex с y < 0
+  if (input.position.x == 0.0 && input.position.z == 0.0 && input.position.y < 0.0) {
+    worldPos = vec3<f32>(translation.x, floorY, translation.z);
+  }
 
   out.clipPos = u.viewProj * vec4<f32>(worldPos, 1.0);
   out.color = input.color;
   return out;
 }
+
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {

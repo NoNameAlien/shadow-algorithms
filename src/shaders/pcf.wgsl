@@ -38,7 +38,7 @@ struct ShadingParams {
   spotYaw: f32,
   spotPitch: f32,
   methodIndex: f32,
-  _pad0: f32,
+  lightIntensity: f32,
   _pad1: f32,
   _pad2: f32,
 };
@@ -186,7 +186,8 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     vis = max(0.0, vis * (1.0 - extra));
   }
 
-  let diffuse = (1.0 - ambient) * lambert * vis;
+  let intensity = max(shading.lightIntensity, 0.0);
+  let diffuse = (1.0 - ambient) * lambert * vis * intensity;
   let finalColor = baseColor * clamp(ambient + diffuse, 0.0, 1.0);
   return vec4<f32>(finalColor, 1.0);
 }

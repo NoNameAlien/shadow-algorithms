@@ -38,10 +38,19 @@ struct ShadingParams {
   spotYaw: f32,
   spotPitch: f32,
   methodIndex: f32,
-  _pad0: f32,
+  lightIntensity: f32,
   _pad1: f32,
   _pad2: f32,
 };
+
+struct GridParams {
+  floorColor: vec3<f32>,
+  _pad0: f32,
+  wallColor: vec3<f32>,
+  _pad1: f32,
+};
+
+@group(0) @binding(1) var<uniform> gridParams: GridParams;
 
 const POISSON_16: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
   vec2<f32>(-0.613, 0.354), vec2<f32>(0.743, -0.125),
@@ -174,19 +183,21 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   }
 
   let rawVisibility = shadowVisibilityFloor(input.lightSpacePos);
-  
-  // Цвет сетки
-  let gridColor = vec3<f32>(0.3, 0.35, 0.4);
-  var baseColor = vec3<f32>(0.15, 0.16, 0.18);
-  let texColor = textureSample(floorTex, floorSampler, input.uv).xyz;
-  baseColor = mix(baseColor, texColor, 1.0);
-    
-  // Смешиваем сетку с фоном
-  let color = mix(baseColor, gridColor, gridAlpha);
-  
-  // немного более тёмный пол, чем раньше
-  let ambient = 0.4;
 
+  let texColor = textureSample(floorTex, floorSampler, input.uv).xyz;
+  let isFloor = abs(input.worldN.y - 1.0) < 0.5;
+
+  var baseColor: vec3<f32>;
+  if (isFloor) {
+    baseColor = gridParams.floorColor * texColor;
+
+    let gridLineColor = vec3<f32>(0.7, 0.75, 0.8);
+    baseColor = mix(baseColor, gridLineColor, gridAlpha);
+  } else {
+    baseColor = gridParams.wallColor;
+  }
+
+  let ambient = 0.4;
   let strength = clamp(shading.shadowStrength, 0.0, 2.0);
 
   let t = clamp(strength, 0.0, 1.0);
@@ -197,7 +208,8 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     vis = max(0.0, vis * (1.0 - extra));
   }
 
-  let diffuse = (1.0 - ambient) * lambert * vis;
-  let finalColor = color * clamp(ambient + diffuse, 0.0, 1.0);
+  let intensity = max(shading.lightIntensity, 0.0);
+  let diffuse = (1.0 - ambient) * lambert * vis * intensity;
+  let finalColor = baseColor * clamp(ambient + diffuse, 0.0, 1.0);
   return vec4<f32>(finalColor, 1.0);
 }

@@ -15,6 +15,20 @@ type Props = {
     onLanguageChange: (lang: 'en' | 'ru') => void;
     autoRotate: boolean;
     onToggleAutoRotate: () => void;
+    showFloor: boolean;
+    showWalls: boolean;
+    floorColor: string;
+    wallColor: string;
+    onShowFloorChange: (value: boolean) => void;
+    onShowWallsChange: (value: boolean) => void;
+    onFloorColorChange: (hex: string) => void;
+    onWallColorChange: (hex: string) => void;
+    objectMoveSpeed: number;
+    onObjectMoveSpeedChange: (value: number) => void;
+    lightIntensity: number;
+    onLightIntensityChange: (value: number) => void;
+    showLightBeam: boolean;
+    onShowLightBeamChange: (value: boolean) => void;
 };
 
 const INITIAL_PARAMS: ShadowParams = {
@@ -67,6 +81,13 @@ const STRINGS = {
         orbitMode: 'ORBIT MODE (default)',
         fpsMode: 'FPS MODE (ESC to exit)',
         fpsLabel: 'FPS',
+        floorShow: 'Show floor',
+        wallsShow: 'Show walls',
+        floorColorLabel: 'Floor color',
+        wallColorLabel: 'Wall color',
+        objectMoveSpeed: 'Object move speed',
+        lightIntensity: 'Light intensity',
+        lightBeamShow: 'Show light beam',
     },
     ru: {
         title: 'Настройки теней',
@@ -91,6 +112,13 @@ const STRINGS = {
         orbitMode: 'ОРБИТАЛЬНЫЙ РЕЖИМ (по умолчанию)',
         fpsMode: 'РЕЖИМ FPS (ESC для выхода)',
         fpsLabel: 'FPS',
+        floorShow: 'Показывать пол',
+        wallsShow: 'Показывать стены',
+        floorColorLabel: 'Цвет пола',
+        wallColorLabel: 'Цвет стен',
+        objectMoveSpeed: 'Скорость перемещения объекта',
+        lightIntensity: 'Яркость света',
+        lightBeamShow: 'Показывать луч источника',
     }
 } as const;
 
@@ -108,7 +136,21 @@ export function ControlPanel({
     lang,
     onLanguageChange,
     autoRotate,
-    onToggleAutoRotate
+    onToggleAutoRotate,
+    showFloor,
+    showWalls,
+    floorColor,
+    wallColor,
+    onShowFloorChange,
+    onShowWallsChange,
+    onFloorColorChange,
+    onWallColorChange,
+    objectMoveSpeed,
+    onObjectMoveSpeedChange,
+    lightIntensity,
+    onLightIntensityChange,
+    showLightBeam,
+    onShowLightBeamChange
 }: Props) {
     const [params, setParams] = useState<ShadowParams>(INITIAL_PARAMS);
     const [modelName, setModelName] = useState<string | null>(null);
@@ -242,36 +284,66 @@ export function ControlPanel({
                     marginBottom: 10
                 }}
             >
-                <div style={{ fontSize: 13, marginBottom: 4, opacity: 0.85 }}>
+                <div style={{ fontSize: 13, marginBottom: 6, opacity: 0.85 }}>
                     {t.lightModeLabel}:{' '}
                     <span style={{ fontWeight: 600 }}>{lightMode.toUpperCase()}</span>
                 </div>
-                <input
-                    type="range"
-                    min={0}
-                    max={2}
-                    step={1}
-                    value={['sun', 'spot', 'top'].indexOf(lightMode)}
-                    onChange={(e) => {
-                        const idx = +e.target.value;
-                        const modes: ('sun' | 'spot' | 'top')[] = ['sun', 'spot', 'top'];
-                        onLightModeChange(modes[idx]);
-                    }}
-                    style={{ width: '100%' }}
-                />
-                <div
-                    style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        fontSize: 12,
-                        marginTop: 2,
-                        opacity: 0.7
-                    }}
-                >
-                    <span>Sun</span>
-                    <span>Spot</span>
-                    <span>Top</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                    {(['sun', 'spot', 'top'] as const).map((mode) => (
+                        <button
+                            key={mode}
+                            type="button"
+                            onClick={() => onLightModeChange(mode)}
+                            style={{
+                                flex: 1,
+                                padding: '4px 6px',
+                                fontSize: 13,
+                                borderRadius: 6,
+                                border: '1px solid #343b4a',
+                                background: lightMode === mode ? '#3b5bdb' : '#252a34',
+                                color: '#e6e6e6',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            {mode.toUpperCase()}
+                        </button>
+                    ))}
                 </div>
+            </div>
+
+            {/* Блок: интенсивность света */}
+            <div
+                style={{
+                    padding: 10,
+                    borderRadius: 8,
+                    background: '#1e222b',
+                    border: '1px solid #262a32',
+                    marginBottom: 10
+                }}
+            >
+                <label style={{ display: 'block', marginBottom: 6 }}>
+                    <span style={{ fontSize: 13 }}>
+                        {t.lightIntensity}: {lightIntensity.toFixed(2)}
+                    </span>
+                    <input
+                        type="range"
+                        min="0.0"
+                        max="3.0"
+                        step="0.1"
+                        value={lightIntensity}
+                        onChange={(e) => onLightIntensityChange(+e.target.value)}
+                        style={{ width: '100%', display: 'block', marginTop: 4 }}
+                    />
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                    <input
+                        type="checkbox"
+                        checked={showLightBeam}
+                        onChange={(e) => onShowLightBeamChange(e.target.checked)}
+                    />
+                    {t.lightBeamShow}
+                </label>
             </div>
 
             {/* Блок: метод теней + параметры */}
@@ -486,6 +558,84 @@ export function ControlPanel({
                 </label>
             </div>
 
+            {/* Блок: скорость перемещения объекта */}
+            <div
+                style={{
+                    padding: 10,
+                    borderRadius: 8,
+                    background: '#1e222b',
+                    border: '1px solid #262a32',
+                    marginBottom: 10
+                }}
+            >
+                <label style={{ display: 'block' }}>
+                    <span style={{ fontSize: 13 }}>
+                        {t.objectMoveSpeed}: {objectMoveSpeed.toFixed(2)}
+                    </span>
+                    <input
+                        type="range"
+                        min="0.2"
+                        max="3.0"
+                        step="0.1"
+                        value={objectMoveSpeed}
+                        onChange={(e) => onObjectMoveSpeedChange(+e.target.value)}
+                        style={{ width: '100%', display: 'block', marginTop: 4 }}
+                    />
+                </label>
+            </div>
+
+
+            {/* Блок: пол и стены */}
+            <div
+                style={{
+                    padding: 10,
+                    borderRadius: 8,
+                    background: '#1e222b',
+                    border: '1px solid #262a32',
+                    marginBottom: 10
+                }}
+            >
+                <div style={{ marginBottom: 6, fontSize: 13, opacity: 0.85 }}>
+                    {lang === 'ru' ? 'Пол и стены' : 'Floor & Walls'}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6, gap: 8 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                        <input
+                            type="checkbox"
+                            checked={showFloor}
+                            onChange={(e) => onShowFloorChange(e.target.checked)}
+                        />
+                        {t.floorShow}
+                    </label>
+                    <input
+                        type="color"
+                        value={floorColor}
+                        onChange={(e) => onFloorColorChange(e.target.value)}
+                        style={{ width: 32, height: 20, padding: 0, border: 'none', cursor: 'pointer' }}
+                        title={t.floorColorLabel}
+                    />
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                        <input
+                            type="checkbox"
+                            checked={showWalls}
+                            onChange={(e) => onShowWallsChange(e.target.checked)}
+                        />
+                        {t.wallsShow}
+                    </label>
+                    <input
+                        type="color"
+                        value={wallColor}
+                        onChange={(e) => onWallColorChange(e.target.value)}
+                        style={{ width: 32, height: 20, padding: 0, border: 'none', cursor: 'pointer' }}
+                        title={t.wallColorLabel}
+                    />
+                </div>
+            </div>
+
             {/* Блок: текстуры и модель */}
             <div
                 style={{
@@ -667,7 +817,18 @@ export function ControlPanel({
                     setParams(INITIAL_PARAMS);
                     onParamsChange(INITIAL_PARAMS);
                     onLightModeChange('sun');
-                    if (!autoRotate) onToggleAutoRotate(); // вернуть вращение
+                    if (!autoRotate) onToggleAutoRotate();
+
+                    onShowFloorChange(true);
+                    onShowWallsChange(true);
+                    onFloorColorChange('#26282d');
+                    onWallColorChange('#1f2226');
+
+                    onWallColorChange('#1f2226');
+                    onObjectMoveSpeedChange(1.0);
+                    onLightIntensityChange(1.0);
+                    onShowLightBeamChange(true);
+
                     onResetScene?.();
                     onResetModel?.();
                     setModelName(null);

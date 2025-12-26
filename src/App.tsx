@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Renderer } from './engine/Renderer';
 import { ControlPanel, type ShadowParams } from './components/ControlPanel';
 import type { LightMode } from './engine/Renderer';
+import sunIcon from './image/light/sun.png';
+import spotIcon from './image/light/spot.png';
+import topIcon from './image/light/top.png';
 
 export default function App() {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -13,6 +16,20 @@ export default function App() {
   type Lang = 'en' | 'ru';
   const [lang, setLang] = useState<Lang>('ru');
   const [autoRotate, setAutoRotate] = useState(true);
+  const [objectMoveSpeed, setObjectMoveSpeed] = useState(1.0);
+  const [lightIntensity, setLightIntensity] = useState(1.0);
+  const [showLightBeam, setShowLightBeam] = useState(true);
+
+  const [showFloor, setShowFloor] = useState(true);
+  const [showWalls, setShowWalls] = useState(true);
+  const [floorColor, setFloorColor] = useState('#26282d');
+  const [wallColor, setWallColor] = useState('#1f2226');
+
+  const [lightScreenPos, setLightScreenPos] = useState<{ x: number; y: number; visible: boolean }>({
+    x: 0,
+    y: 0,
+    visible: false
+  });
 
   useEffect(() => {
     (async () => {
@@ -42,6 +59,32 @@ export default function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    let frameId: number;
+
+    const loop = () => {
+      const r = rendererRef.current;
+      if (r) {
+        const pos = r.getLightScreenPosition();
+        setLightScreenPos(pos);
+      }
+      frameId = requestAnimationFrame(loop);
+    };
+
+    frameId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(frameId);
+  }, []);
+
+  const hexToRgb01 = (hex: string): [number, number, number] => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+    if (!m) return [0.2, 0.2, 0.2];
+    const intVal = parseInt(m[1], 16);
+    const r = ((intVal >> 16) & 255) / 255;
+    const g = ((intVal >> 8) & 255) / 255;
+    const b = (intVal & 255) / 255;
+    return [r, g, b];
+  };
 
   const handleParamsChange = (params: ShadowParams) => {
     if (rendererRef.current) {
@@ -82,6 +125,21 @@ export default function App() {
     });
   };
 
+  const handleObjectMoveSpeedChange = (value: number) => {
+    setObjectMoveSpeed(value);
+    rendererRef.current?.setObjectMoveSpeed(value);
+  };
+
+  const handleLightIntensityChange = (value: number) => {
+    setLightIntensity(value);
+    rendererRef.current?.setLightIntensity(value);
+  };
+
+  const handleShowLightBeamChange = (value: boolean) => {
+    setShowLightBeam(value);
+    rendererRef.current?.setShowLightBeam(value);
+  };
+
   const handleLoadObjectTexture = (file: File) => {
     rendererRef.current?.loadObjectTexture(file);
   };
@@ -90,9 +148,73 @@ export default function App() {
     rendererRef.current?.loadFloorTexture(file);
   };
 
+  const handleShowFloorChange = (value: boolean) => {
+    setShowFloor(value);
+    rendererRef.current?.setFloorVisible(value);
+  };
+
+  const handleShowWallsChange = (value: boolean) => {
+    setShowWalls(value);
+    rendererRef.current?.setWallsVisible(value);
+  };
+
+  const handleFloorColorChange = (hex: string) => {
+    setFloorColor(hex);
+    rendererRef.current?.setFloorColor(hexToRgb01(hex));
+  };
+
+  const handleWallColorChange = (hex: string) => {
+    setWallColor(hex);
+    rendererRef.current?.setWallColor(hexToRgb01(hex));
+  };
+
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#14161a', color: '#e6e6e6' }}>
-      <canvas ref={ref} style={{ width: '100%', height: '100%', display: 'block' }} />
+      <div style={{ position: 'relative', flex: 1 }}>
+        <canvas
+          ref={ref}
+          style={{ width: '100%', height: '100%', display: 'block' }}
+        />
+
+        {/* Иконка источника света поверх canvas */}
+        {lightScreenPos.visible && (
+          <img
+            src={
+              lightMode === 'sun'
+                ? sunIcon
+                : lightMode === 'spot'
+                  ? spotIcon
+                  : topIcon
+            }
+            alt={lightMode}
+            style={{
+              position: 'absolute',
+              left: lightScreenPos.x - 16,
+              top: lightScreenPos.y - 16,
+              width: 32,
+              height: 32,
+              pointerEvents: 'none', 
+            }}
+          />
+        )}
+
+        {error && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 12,
+              left: 12,
+              padding: 8,
+              background: '#2b2f36',
+              borderRadius: 6,
+              maxWidth: 420
+            }}
+          >
+            <b>Ошибка WebGPU:</b> {error}
+          </div>
+        )}
+      </div>
+
       <ControlPanel
         onParamsChange={handleParamsChange}
         onLoadModel={handleLoadModel}
@@ -108,6 +230,20 @@ export default function App() {
         onLanguageChange={setLang}
         autoRotate={autoRotate}
         onToggleAutoRotate={handleToggleAutoRotate}
+        showFloor={showFloor}
+        showWalls={showWalls}
+        floorColor={floorColor}
+        wallColor={wallColor}
+        onShowFloorChange={handleShowFloorChange}
+        onShowWallsChange={handleShowWallsChange}
+        onFloorColorChange={handleFloorColorChange}
+        onWallColorChange={handleWallColorChange}
+        objectMoveSpeed={objectMoveSpeed}
+        onObjectMoveSpeedChange={handleObjectMoveSpeedChange}
+        lightIntensity={lightIntensity}
+        onLightIntensityChange={handleLightIntensityChange}
+        showLightBeam={showLightBeam}
+        onShowLightBeamChange={handleShowLightBeamChange}
       />
       {error && (
         <div style={{ position: 'absolute', top: 12, left: 12, padding: 8, background: '#2b2f36', borderRadius: 6, maxWidth: 420 }}>
