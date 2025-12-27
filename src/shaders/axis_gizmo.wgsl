@@ -9,12 +9,14 @@ struct VSOut {
 };
 
 struct Uniforms {
-  model        : mat4x4<f32>,
-  viewProj     : mat4x4<f32>,
+  model: mat4x4<f32>,
+  viewProj: mat4x4<f32>,
   lightViewProj: mat4x4<f32>,
-  lightDir     : vec4<f32>,
-  shadowParams : vec4<f32>,
+  lightDir: vec4<f32>,
+  cameraPos: vec4<f32>,
+  shadowParams: vec4<f32>,
 };
+
 
 @group(0) @binding(0) var<uniform> u : Uniforms;
 

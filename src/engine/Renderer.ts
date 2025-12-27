@@ -23,6 +23,82 @@ type GPUCtx = {
 };
 type Selection = 'none' | 'object' | 'light';
 
+type LightDef = {
+  pos: vec3;
+  type: LightMode;
+  yaw: number;
+  pitch: number;
+  intensity: number;
+  color: vec3;
+  castShadows: boolean;
+};
+
+type SceneObject = {
+  id: number;
+  pos: vec3;
+  moveSpeed: number;
+  color: vec3;
+  castShadows: boolean;
+  receiveShadows: boolean;
+  meshId: number;
+  specular: number;
+  shininess: number;
+};
+
+type MeshDef = {
+  id: number;
+  name: string;
+  vbo: GPUBuffer;
+  nbo: GPUBuffer;
+  tbo: GPUBuffer;
+  ibo: GPUBuffer;
+  indexCount: number;
+};
+
+type LightDTO = {
+  pos: [number, number, number];
+  type: LightMode;
+  yaw: number;
+  pitch: number;
+  intensity: number;
+  color: [number, number, number];
+  castShadows: boolean;
+};
+
+type ObjectDTO = {
+  pos: [number, number, number];
+  moveSpeed: number;
+  color: [number, number, number];
+  castShadows: boolean;
+  receiveShadows: boolean;
+  meshId: number;
+  specular: number;
+  shininess: number;
+};
+
+type ShadowParamsDTO = {
+  shadowMapSize: number;
+  bias: number;
+  method: ShadowMethod;
+  pcfRadius: number;
+  pcfSamples: number;
+  pcssLightSize: number;
+  pcssBlockerSearchSamples: number;
+  vsmMinVariance: number;
+  vsmLightBleedReduction: number;
+  shadowStrength: number;
+};
+
+type SceneDTO = {
+  lights: LightDTO[];
+  objects: ObjectDTO[];
+  floorColor: [number, number, number];
+  wallColor: [number, number, number];
+  showFloor: boolean;
+  showWalls: boolean;
+  shadowParams: ShadowParamsDTO;
+};
+
 export type ShadowMethod = 'SM' | 'PCF' | 'PCSS' | 'VSM';
 export type LightMode = 'sun' | 'spot' | 'top';
 
@@ -73,11 +149,15 @@ export class Renderer {
   private objectPos = vec3.fromValues(0, 0, 0); // центр объекта в мире
   private lightSelected = false;
 
+  // Объекты сцены
+  private objects: SceneObject[] = [];
+  private activeObjectIndex = 0;
+
   private shadowSize = 2048;
   private shadowTex!: GPUTexture;
   private shadowView!: GPUTextureView;
-  private shadowSampler!: GPUSampler;
-  private shadowSamplerLinear!: GPUSampler; // для чтения depth в PCSS
+  private shadowSampler!: GPUSampler;       // общий sampler_comparison
+  private shadowSamplerLinear!: GPUSampler; // для PCSS
 
   // VSM текстуры
   private vsmMomentsTex!: GPUTexture;
@@ -143,6 +223,8 @@ export class Renderer {
   private shadingBuf!: GPUBuffer;
   private shadingBindGroupMain: GPUBindGroup | null = null;
   private shadingBindGroupGrid!: GPUBindGroup;
+  private lightsBuf!: GPUBuffer;
+  private objectParamsBuf!: GPUBuffer;
 
   private objTexture!: GPUTexture;
   private objTextureView!: GPUTextureView;
@@ -204,8 +286,285 @@ export class Renderer {
   private lightIntensity = 1.0;
   private showLightBeam = true;
 
-  setLightIntensity(value: number) {
-    this.lightIntensity = value;
+  private lights: LightDef[] = [];
+  private activeLightIndex = 0;
+
+  private meshes: MeshDef[] = [];
+  private defaultMeshId = 0; // индекс «куба» по умолчанию
+
+  // Метаданные для UI
+  getLightsMeta() {
+    return {
+      count: this.lights.length,
+      activeIndex: this.activeLightIndex
+    };
+  }
+
+  // Установить активный источник
+  setActiveLight(index: number) {
+    if (this.lights.length === 0) return;
+    const clamped = Math.max(0, Math.min(index, this.lights.length - 1));
+    this.activeLightIndex = clamped;
+  }
+
+  // Добавить новый источник (возвращает его индекс)
+  addLight(def?: Partial<LightDef>): number {
+    if (this.lights.length >= 4) {
+      console.warn('Максимум 4 источника света');
+      return this.lights.length - 1;
+    }
+
+    const basePos = def?.pos
+      ? vec3.clone(def.pos)
+      : vec3.fromValues(this.objectPos[0] + 4, 6, this.objectPos[2] + 2);
+
+    const light: LightDef = {
+      pos: basePos,
+      type: def?.type ?? 'spot',
+      yaw: def?.yaw ?? 0.8,
+      pitch: def?.pitch ?? -0.6,
+      intensity: def?.intensity ?? 1.0,
+      color: def?.color ?? vec3.fromValues(1.0, 1.0, 1.0),
+      castShadows: def?.castShadows ?? false
+    };
+
+    this.lights.push(light);
+    const idx = this.lights.length - 1;
+    this.setActiveLight(idx);
+    return idx;
+  }
+
+  // Удалить источник (кроме того, чтобы не остаться без единого)
+  removeLight(index: number) {
+    if (this.lights.length <= 1) {
+      console.warn('Должен быть хотя бы один источник света');
+      return;
+    }
+
+    if (index < 0 || index >= this.lights.length) return;
+
+    this.lights.splice(index, 1);
+
+    if (this.activeLightIndex >= this.lights.length) {
+      this.activeLightIndex = this.lights.length - 1;
+    }
+    // Обновляем старые поля под новый активный
+    const l = this.lights[this.activeLightIndex];
+    this.lightMode = l.type;
+    this.lightIntensity = l.intensity;
+    vec3.copy(this.lightDir, l.pos);
+    this.spotYaw = l.yaw;
+    this.spotPitch = l.pitch;
+    this.updateLightViewProj();
+  }
+
+  // Метаданные объектов для UI
+  getObjectsMeta() {
+    return {
+      count: this.objects.length,
+      activeIndex: this.activeObjectIndex
+    };
+  }
+
+  exportScene(): SceneDTO {
+    const lights: LightDTO[] = this.lights.map((l) => ({
+      pos: [l.pos[0], l.pos[1], l.pos[2]],
+      type: l.type,
+      yaw: l.yaw,
+      pitch: l.pitch,
+      intensity: l.intensity,
+      color: [l.color[0], l.color[1], l.color[2]],
+      castShadows: l.castShadows
+    }));
+
+    const objects: ObjectDTO[] = this.objects.map((o) => ({
+      pos: [o.pos[0], o.pos[1], o.pos[2]],
+      moveSpeed: o.moveSpeed,
+      color: [o.color[0], o.color[1], o.color[2]],
+      castShadows: o.castShadows,
+      receiveShadows: o.receiveShadows,
+      meshId: o.meshId ?? this.defaultMeshId,
+      specular: o.specular,
+      shininess: o.shininess
+    }));
+
+    return {
+      lights,
+      objects,
+      floorColor: [this.floorColor[0], this.floorColor[1], this.floorColor[2]],
+      wallColor: [this.wallColor[0], this.wallColor[1], this.wallColor[2]],
+      showFloor: this.showFloor,
+      showWalls: this.showWalls,
+      shadowParams: { ...this.shadowParams }
+    };
+  }
+
+  importScene(scene: SceneDTO) {
+    // Свет
+    this.lights = scene.lights.map((ld) => ({
+      pos: vec3.fromValues(ld.pos[0], ld.pos[1], ld.pos[2]),
+      type: ld.type,
+      yaw: ld.yaw,
+      pitch: ld.pitch,
+      intensity: ld.intensity,
+      color: vec3.fromValues(
+        ld.color?.[0] ?? 1.0,
+        ld.color?.[1] ?? 1.0,
+        ld.color?.[2] ?? 1.0
+      ),
+      castShadows: ld.castShadows ?? false
+    }));
+
+    if (this.lights.length === 0) {
+      this.initDefaultLights();
+    }
+    this.activeLightIndex = 0;
+
+    const main = this.lights[0];
+    this.lightMode = main.type;
+    this.lightIntensity = main.intensity;
+    vec3.copy(this.lightDir, main.pos);
+    this.spotYaw = main.yaw;
+    this.spotPitch = main.pitch;
+    this.updateLightViewProj();
+
+    // Объекты
+    this.objects = scene.objects.map((od, idx) => ({
+      id: idx,
+      pos: vec3.fromValues(od.pos[0], od.pos[1], od.pos[2]),
+      moveSpeed: od.moveSpeed,
+      color: vec3.fromValues(
+        od.color?.[0] ?? 1.0,
+        od.color?.[1] ?? 1.0,
+        od.color?.[2] ?? 1.0
+      ),
+      castShadows: od.castShadows ?? true,
+      receiveShadows: od.receiveShadows ?? true,
+      meshId: od.meshId ?? this.defaultMeshId,
+      specular: od.specular ?? 0.5,
+      shininess: od.shininess ?? 32.0
+    }));
+
+    if (this.objects.length === 0) {
+      this.initDefaultObjects();
+    }
+    this.activeObjectIndex = 0;
+    vec3.copy(this.objectPos, this.objects[0].pos);
+
+    // Пол и стены
+    vec3.set(this.floorColor, scene.floorColor[0], scene.floorColor[1], scene.floorColor[2]);
+    vec3.set(this.wallColor, scene.wallColor[0], scene.wallColor[1], scene.wallColor[2]);
+    this.showFloor = scene.showFloor;
+    this.showWalls = scene.showWalls;
+
+    // Параметры теней
+    this.updateShadowParams(scene.shadowParams);
+
+    console.log('✓ Scene imported from JSON');
+  }
+
+  setActiveObject(index: number) {
+    if (this.objects.length === 0) return;
+    const clamped = Math.max(0, Math.min(index, this.objects.length - 1));
+    this.activeObjectIndex = clamped;
+    const obj = this.objects[clamped];
+    vec3.copy(this.objectPos, obj.pos);
+  }
+
+  addObject(def?: Partial<SceneObject>): number {
+    const id = this.objects.length ? this.objects[this.objects.length - 1].id + 1 : 0;
+    const basePos = def?.pos
+      ? vec3.clone(def.pos)
+      : vec3.fromValues(this.objectPos[0] + 2, this.objectPos[1], this.objectPos[2] + 2);
+
+    const obj: SceneObject = {
+      id,
+      pos: basePos,
+      moveSpeed: def?.moveSpeed ?? this.objectMoveSpeed,
+      color: def?.color ?? vec3.fromValues(1.0, 1.0, 1.0),
+      castShadows: def?.castShadows ?? true,
+      receiveShadows: def?.receiveShadows ?? true,
+      meshId: def?.meshId ?? this.defaultMeshId,
+      specular: def?.specular ?? 0.5,
+      shininess: def?.shininess ?? 32.0
+    };
+
+    this.objects.push(obj);
+    this.activeObjectIndex = this.objects.length - 1;
+    vec3.copy(this.objectPos, obj.pos);
+    return this.activeObjectIndex;
+  }
+
+  removeObject(index: number) {
+    if (this.objects.length <= 1) {
+      console.warn('Должен быть хотя бы один объект');
+      return;
+    }
+    if (index < 0 || index >= this.objects.length) return;
+
+    this.objects.splice(index, 1);
+    if (this.activeObjectIndex >= this.objects.length) {
+      this.activeObjectIndex = this.objects.length - 1;
+    }
+    const obj = this.objects[this.activeObjectIndex];
+    vec3.copy(this.objectPos, obj.pos);
+  }
+
+  getActiveObjectInfo() {
+    const obj = this.objects[this.activeObjectIndex];
+    if (!obj) {
+      return {
+        color: [1, 1, 1] as [number, number, number],
+        castShadows: true,
+        receiveShadows: true,
+        meshId: this.defaultMeshId,
+        specular: 0.5,
+        shininess: 32.0
+      };
+    }
+    return {
+      color: [obj.color[0], obj.color[1], obj.color[2]] as [number, number, number],
+      castShadows: obj.castShadows,
+      receiveShadows: obj.receiveShadows,
+      meshId: obj.meshId,
+      specular: obj.specular,
+      shininess: obj.shininess
+    };
+  }
+
+  setActiveObjectSpecular(value: number) {
+    const obj = this.objects[this.activeObjectIndex];
+    if (obj) {
+      obj.specular = value;
+    }
+  }
+
+  setActiveObjectShininess(value: number) {
+    const obj = this.objects[this.activeObjectIndex];
+    if (obj) {
+      obj.shininess = value;
+    }
+  }
+
+  setActiveObjectColor(rgb: [number, number, number]) {
+    const obj = this.objects[this.activeObjectIndex];
+    if (obj) {
+      vec3.set(obj.color, rgb[0], rgb[1], rgb[2]);
+    }
+  }
+
+  setActiveObjectCastShadows(value: boolean) {
+    const obj = this.objects[this.activeObjectIndex];
+    if (obj) {
+      obj.castShadows = value;
+    }
+  }
+
+  setActiveObjectReceiveShadows(value: boolean) {
+    const obj = this.objects[this.activeObjectIndex];
+    if (obj) {
+      obj.receiveShadows = value;
+    }
   }
 
   setShowLightBeam(value: boolean) {
@@ -218,6 +577,18 @@ export class Renderer {
 
   setLightMode(mode: LightMode) {
     this.lightMode = mode;
+    const l = this.lights[this.activeLightIndex];
+    if (l) {
+      l.type = mode;
+    }
+  }
+
+  setLightIntensity(value: number) {
+    this.lightIntensity = value;
+    const l = this.lights[this.activeLightIndex];
+    if (l) {
+      l.intensity = value;
+    }
   }
 
   setObjectAutoRotate(enabled: boolean) {
@@ -238,6 +609,58 @@ export class Renderer {
 
   setWallColor(rgb: [number, number, number]) {
     vec3.set(this.wallColor, rgb[0], rgb[1], rgb[2]);
+  }
+
+  private getShadowCasterIndex(): number {
+    for (let i = 0; i < this.lights.length; i++) {
+      if (this.lights[i].castShadows) return i;
+    }
+    return -1;
+  }
+
+  private initDefaultLights() {
+    this.lights = [];
+    const main: LightDef = {
+      pos: vec3.clone(this.lightDir),
+      type: this.lightMode,
+      yaw: this.spotYaw,
+      pitch: this.spotPitch,
+      intensity: this.lightIntensity,
+      color: vec3.fromValues(1.0, 1.0, 1.0),
+      castShadows: true
+    };
+    this.lights.push(main);
+
+    const second: LightDef = {
+      pos: vec3.fromValues(-6, 8, -4),
+      type: 'spot',
+      yaw: 0.8,
+      pitch: -0.6,
+      intensity: 0.7,
+      color: vec3.fromValues(1.0, 0.9, 0.7),
+      castShadows: false
+    };
+    this.lights.push(second);
+
+    this.activeLightIndex = 0;
+  }
+
+  private initDefaultObjects() {
+    this.objects = [
+      {
+        id: 0,
+        pos: vec3.fromValues(0, 0, 0),
+        moveSpeed: 1.0,
+        color: vec3.fromValues(1.0, 1.0, 1.0),
+        castShadows: true,
+        receiveShadows: true,
+        meshId: this.defaultMeshId,
+        specular: 0.5,
+        shininess: 32.0
+      }
+    ];
+    this.activeObjectIndex = 0;
+    vec3.copy(this.objectPos, this.objects[0].pos);
   }
 
   private getLightModeIndex(): number {
@@ -293,6 +716,8 @@ export class Renderer {
     this.updateViewProj();
     this.updateLightViewProj();
     this.initSpotOrientationFromPosition();
+    this.initDefaultObjects();
+    this.initDefaultLights();
 
     // Обработка мыши для выбора и перетаскивания
     this.canvas.addEventListener('mousedown', (e) => {
@@ -365,6 +790,11 @@ export class Renderer {
           t
         );
         vec3.copy(this.objectPos, newPos);
+
+        const obj = this.objects[this.activeObjectIndex];
+        if (obj) {
+          vec3.copy(obj.pos, newPos);
+        }
       } else if (this.isDraggingLight && this.dragAxisIndex !== -1) {
         const dx = e.clientX - this.dragStartMouseX;
         const dy = e.clientY - this.dragStartMouseY;
@@ -386,7 +816,12 @@ export class Renderer {
           t
         );
 
-        vec3.copy(this.lightDir, newPos); // lightDir теперь = позиция света
+        const l = this.lights[this.activeLightIndex];
+        if (l) {
+          vec3.copy(l.pos, newPos);
+        }
+
+        // Тени всегда от активного света → всегда обновляем shadow-камеру
         this.updateLightViewProj();
       } else if (this.isRotatingLight) {
         const dx = e.clientX - this.rotateStartMouseX;
@@ -399,6 +834,14 @@ export class Renderer {
         const minPitch = -maxPitch;
         const newPitch = this.rotateStartPitch - dy * rotSpeed;
         this.spotPitch = Math.max(minPitch, Math.min(maxPitch, newPitch));
+        const l = this.lights[this.activeLightIndex];
+        if (l) {
+          l.yaw = this.spotYaw;
+          l.pitch = this.spotPitch;
+        }
+
+        // Активный свет — теневой → обновляем shadow-камеру
+        this.updateLightViewProj();
       }
     });
 
@@ -446,16 +889,25 @@ export class Renderer {
     vec3.normalize(rayDir, rayDir);
     const rayOrigin = this.cameraController.getCameraPosition();
 
-    const objectCenter = this.objectPos;
+    // Поиск ближайшего объекта
     const objectRadius = 1.8;
+    let bestObjT = Number.POSITIVE_INFINITY;
+    let bestObjIndex = -1;
 
-    const lightCenter = this.lightDir; // позиция света
+    for (let i = 0; i < this.objects.length; i++) {
+      const center = this.objects[i].pos;
+      const t = this.raySphereHit(rayOrigin, rayDir, center, objectRadius);
+      if (t < bestObjT) {
+        bestObjT = t;
+        bestObjIndex = i;
+      }
+    }
+
+    const lightCenter = this.lightDir; // главный теневой свет
     const lightRadius = 0.9;
-
-    const tObj = this.raySphereHit(rayOrigin, rayDir, objectCenter, objectRadius);
     const tLight = this.raySphereHit(rayOrigin, rayDir, lightCenter, lightRadius);
 
-    const hasObj = tObj < Number.POSITIVE_INFINITY;
+    const hasObj = bestObjIndex !== -1;
     const hasLight = tLight < Number.POSITIVE_INFINITY;
 
     if (!hasObj && !hasLight) {
@@ -464,9 +916,12 @@ export class Renderer {
     }
 
     if (hasObj && hasLight) {
-      if (tLight < tObj) {
+      if (tLight < bestObjT) {
         this.setSelection('light');
       } else {
+        this.activeObjectIndex = bestObjIndex;
+        const obj = this.objects[this.activeObjectIndex];
+        vec3.copy(this.objectPos, obj.pos);
         this.setSelection('object');
       }
       return;
@@ -478,6 +933,9 @@ export class Renderer {
     }
 
     if (hasObj) {
+      this.activeObjectIndex = bestObjIndex;
+      const obj = this.objects[this.activeObjectIndex];
+      vec3.copy(this.objectPos, obj.pos);
       this.setSelection('object');
       return;
     }
@@ -1000,6 +1458,19 @@ export class Renderer {
 
     this.ibo = device.createBuffer({ size: indices.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(this.ibo, 0, indices);
+
+    this.meshes = [];
+    const mesh: MeshDef = {
+      id: 0,
+      name: 'Cube',
+      vbo: this.vbo,
+      nbo: this.nbo,
+      tbo: this.tbo,
+      ibo: this.ibo,
+      indexCount: this.indexCount
+    };
+    this.meshes.push(mesh);
+    this.defaultMeshId = 0;
   }
 
   private createGrid() {
@@ -1313,7 +1784,7 @@ export class Renderer {
 
   private createUniforms() {
     const { device } = this.gpu;
-    const uniformSize = 16 * 4 * 3 + 4 * 4 * 2;
+    const uniformSize = 16 * 4 * 3 + 4 * 4 * 3;
 
     this.uniformBuf = device.createBuffer({
       size: uniformSize,
@@ -1331,7 +1802,20 @@ export class Renderer {
     });
 
     this.gridParamsBuf = device.createBuffer({
-      size: 32, // floorColor(vec3)+pad, wallColor(vec3)+pad
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+
+    this.objectParamsBuf = device.createBuffer({
+      size: 32, // два vec4<f32> = 8 float32
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+
+    this.lightsBuf = device.createBuffer({
+      // count(4) + pad(12) + 4 * sizeof(Light)
+      // Light = vec3 + f + f + f + f + vec3 = 16 * 4 bytes = 64
+      // Итого 16*4 + 4*64 = 64 + 256 = 320 → округлим до 352 для выравнивания
+      size: 352,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
   }
@@ -1356,7 +1840,10 @@ export class Renderer {
 
     this.bindGroup0Main = device.createBindGroup({
       layout: currentPipeline.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }]
+      entries: [
+        { binding: 0, resource: { buffer: this.uniformBuf } },
+        { binding: 1, resource: { buffer: this.objectParamsBuf } }
+      ]
     });
 
     if (this.shadowParams.method === 'PCSS') {
@@ -1425,13 +1912,19 @@ export class Renderer {
     // Shading params for main object (group 3) — для текущего метода
     this.shadingBindGroupMain = device.createBindGroup({
       layout: currentPipeline.getBindGroupLayout(3),
-      entries: [{ binding: 0, resource: { buffer: this.shadingBuf } }]
+      entries: [
+        { binding: 0, resource: { buffer: this.shadingBuf } },
+        { binding: 1, resource: { buffer: this.lightsBuf } }
+      ]
     });
 
     // Shading params for grid (group 3)
     this.shadingBindGroupGrid = device.createBindGroup({
       layout: this.gridPipeline.getBindGroupLayout(3),
-      entries: [{ binding: 0, resource: { buffer: this.shadingBuf } }]
+      entries: [
+        { binding: 0, resource: { buffer: this.shadingBuf } },
+        { binding: 1, resource: { buffer: this.lightsBuf } }
+      ]
     });
 
     // Object texture bind group (group = 2) — теперь есть во всех методах
@@ -1500,10 +1993,16 @@ export class Renderer {
   }
 
   private updateLightViewProj() {
-    // Позиция света в мире
-    const lightPos = vec3.clone(this.lightDir);
+    let casterIndex = this.getShadowCasterIndex();
+    if (casterIndex < 0 || casterIndex >= this.lights.length) {
+      casterIndex = this.activeLightIndex;
+    }
 
-    // Нормаль направления света для up-вектора
+    const main = this.lights[casterIndex];
+    const pos = main ? main.pos : this.lightDir;
+
+    const lightPos = vec3.clone(pos);
+
     const lightDirNorm = vec3.normalize(vec3.create(), lightPos);
 
     let up = vec3.fromValues(0, 1, 0);
@@ -1522,30 +2021,36 @@ export class Renderer {
     orthoZO(lightProj, -size, size, -size, size, near, far);
 
     mat4.multiply(this.lightViewProj, lightProj, lightView);
+
+    vec3.copy(this.lightDir, lightPos);
   }
 
   private updateLightBeamGeometry() {
     const { device } = this.gpu;
     if (!this.lightBeamVBO) return;
 
-    const lightPos = this.lightDir;
+    const active = this.lights[this.activeLightIndex];
+    if (!active) {
+      const zero = new Float32Array(6);
+      device.queue.writeBuffer(this.lightBeamVBO, 0, zero);
+      return;
+    }
+
+    const lightPos = active.pos;
     const floorY = -2.5;
 
     const dir = vec3.create();
 
-    if (this.lightMode === 'spot') {
-      const yaw = this.spotYaw;
-      const pitch = this.spotPitch;
+    if (active.type === 'spot') {
       vec3.set(
         dir,
-        Math.cos(pitch) * Math.sin(yaw),
-        Math.sin(pitch),
-        Math.cos(pitch) * Math.cos(yaw)
+        Math.cos(active.pitch) * Math.sin(active.yaw),
+        Math.sin(active.pitch),
+        Math.cos(active.pitch) * Math.cos(active.yaw)
       );
-    } else if (this.lightMode === 'top') {
+    } else if (active.type === 'top') {
       vec3.set(dir, 0, -1, 0);
     } else { // sun
-      // направляем луч от источника к центру (0,0,0)
       vec3.set(dir, -lightPos[0], -lightPos[1], -lightPos[2]);
     }
 
@@ -1561,23 +2066,19 @@ export class Renderer {
     const endWorld = vec3.create();
 
     if (Math.abs(dy) < 1e-4) {
-      // почти горизонтальный луч — рисуем короткий сегмент
       vec3.scaleAndAdd(endWorld, lightPos, dir, 3.0);
     } else {
       const t = (floorY - lightPos[1]) / dy;
       if (t <= 0.0) {
-        // плоскость позади источника — тоже короткий сегмент
         vec3.scaleAndAdd(endWorld, lightPos, dir, 3.0);
       } else {
         vec3.scaleAndAdd(endWorld, lightPos, dir, t);
       }
     }
 
-    // локальные координаты вокруг источника: start=(0,0,0), endLocal=endWorld - lightPos
-    const endLocal = vec3.subtract(vec3.create(), endWorld, lightPos);
     const verts = new Float32Array([
-      0, 0, 0,
-      endLocal[0], endLocal[1], endLocal[2]
+      lightPos[0], lightPos[1], lightPos[2],
+      endWorld[0], endWorld[1], endWorld[2]
     ]);
     device.queue.writeBuffer(this.lightBeamVBO, 0, verts);
   }
@@ -1585,7 +2086,10 @@ export class Renderer {
   // Экранная позиция источника света (для оверлей-иконки)
   getLightScreenPosition(): { x: number; y: number; visible: boolean } {
     const rect = this.canvas.getBoundingClientRect();
-    const lightPos = this.lightDir;
+    const active = this.lights[this.activeLightIndex];
+    if (!active) return { x: 0, y: 0, visible: false };
+
+    const lightPos = active.pos;
 
     // Мировая позиция → clip space
     const p = vec4.fromValues(lightPos[0], lightPos[1], lightPos[2], 1.0);
@@ -1610,14 +2114,59 @@ export class Renderer {
     return { x: sx, y: sy, visible };
   }
 
-    getLightInfo() {
+  getMeshesMeta() {
+    return this.meshes.map(m => ({ id: m.id, name: m.name }));
+  }
+
+  setActiveObjectMesh(meshId: number) {
+    const obj = this.objects[this.activeObjectIndex];
+    if (obj) {
+      obj.meshId = meshId;
+    }
+  }
+
+  setLightColor(rgb: [number, number, number]) {
+    const l = this.lights[this.activeLightIndex];
+    if (l) {
+      vec3.set(l.color, rgb[0], rgb[1], rgb[2]);
+    }
+  }
+
+  getLightInfo() {
+    const active = this.lights[this.activeLightIndex];
+    if (!active) {
+      return {
+        mode: this.lightMode,
+        intensity: this.lightIntensity,
+        position: vec3.clone(this.lightDir),
+        color: [1, 1, 1] as [number, number, number],
+        castShadows: true
+      };
+    }
     return {
-      mode: this.lightMode,
-      intensity: this.lightIntensity,
-      position: vec3.clone(this.lightDir),
+      mode: active.type,
+      intensity: active.intensity,
+      position: vec3.clone(active.pos),
+      color: [active.color[0], active.color[1], active.color[2]] as [number, number, number],
+      castShadows: active.castShadows
     };
   }
 
+  setActiveLightCastShadows(value: boolean) {
+    const l = this.lights[this.activeLightIndex];
+    if (!l) return;
+
+    if (value) {
+      // Только один источник кидает тени
+      this.lights.forEach((light, idx) => {
+        light.castShadows = (idx === this.activeLightIndex);
+      });
+    } else {
+      l.castShadows = false;
+    }
+
+    this.updateLightViewProj();
+  }
 
   async loadObjectTexture(file: File) {
     if (this.objTexture) this.objTexture.destroy();
@@ -1673,6 +2222,9 @@ export class Renderer {
     if (this.wallTBO) this.wallTBO.destroy();
     if (this.lightBeamVBO) this.lightBeamVBO.destroy();
     if (this.lightBeamIBO) this.lightBeamIBO.destroy();
+    if (this.lightsBuf) this.lightsBuf.destroy();
+    if (this.objectParamsBuf) this.objectParamsBuf.destroy();
+
     console.log('✓ Renderer destroyed');
   }
 
@@ -1705,8 +2257,11 @@ export class Renderer {
     shadingData[3] = this.spotPitch;
     shadingData[4] = methodIndex;
     shadingData[5] = this.lightIntensity;
-    shadingData[6] = 0;
+
+    const casterIndex = this.getShadowCasterIndex(); // -1 если ни один не помечен
+    shadingData[6] = casterIndex; // shadowCaster
     shadingData[7] = 0;
+
     device.queue.writeBuffer(this.shadingBuf, 0, shadingData.buffer);
 
     const gridParams = new Float32Array(8);
@@ -1718,6 +2273,46 @@ export class Renderer {
     gridParams[6] = this.wallColor[2];
     device.queue.writeBuffer(this.gridParamsBuf, 0, gridParams.buffer);
 
+    // LightsData: пока один источник — наш текущий свет
+    const maxLights = 4;
+    const lightStructFloats = 16;
+    const lightsData = new Float32Array(4 + 12 + maxLights * lightStructFloats);
+
+    const count = Math.min(this.lights.length || 1, maxLights);
+    lightsData[0] = count;
+
+    for (let i = 0; i < count; i++) {
+      const l = this.lights[i] ?? {
+        pos: this.lightDir,
+        type: this.lightMode,
+        yaw: this.spotYaw,
+        pitch: this.spotPitch,
+        intensity: this.lightIntensity,
+        color: vec3.fromValues(1, 1, 1)
+      };
+
+      const base = 4 + i * lightStructFloats;
+      lightsData[base + 0] = l.pos[0];
+      lightsData[base + 1] = l.pos[1];
+      lightsData[base + 2] = l.pos[2];
+      lightsData[base + 3] =
+        l.type === 'sun' ? 0 :
+          l.type === 'spot' ? 1 : 2;
+      lightsData[base + 4] = l.yaw;
+      lightsData[base + 5] = l.pitch;
+      lightsData[base + 6] = l.intensity;
+      // base+7 остаётся нулём
+      lightsData[base + 8] = l.color[0];
+      lightsData[base + 9] = l.color[1];
+      lightsData[base + 10] = l.color[2];
+      // остальной паддинг — нули
+    }
+
+    device.queue.writeBuffer(this.lightsBuf, 0, lightsData.buffer);
+    const activeObj = this.objects[this.activeObjectIndex];
+    if (activeObj) {
+      vec3.copy(this.objectPos, activeObj.pos);
+    }
     this.cameraController.update(deltaTime);
     this.updateViewProj();
 
@@ -1734,7 +2329,9 @@ export class Renderer {
 
     const lightPos = this.lightDir;
 
-    const tmp = new Float32Array(16 * 3 + 4 * 2);
+    const camPos = this.cameraController.getCameraPosition();
+
+    const tmp = new Float32Array(16 * 3 + 4 * 3);
     tmp.set(this.model, 0);
     tmp.set(this.viewProj, 16);
     tmp.set(this.lightViewProj, 32);
@@ -1744,42 +2341,45 @@ export class Renderer {
       lightPos[2],
       this.lightSelected ? 1 : 0
     ], 48);
+    tmp.set([
+      camPos[0],
+      camPos[1],
+      camPos[2],
+      1.0
+    ], 52);
 
     if (this.shadowParams.method === 'PCSS') {
-      // PCSS оставляем как было
       tmp.set([
         this.shadowParams.bias,
         this.shadowParams.pcssLightSize,
         this.shadowParams.pcssBlockerSearchSamples,
         this.shadowParams.shadowMapSize
-      ], 52);
+      ], 56);
     } else if (this.shadowParams.method === 'VSM') {
-      // VSM тоже без изменений
       tmp.set([
         this.shadowParams.vsmMinVariance,
         this.shadowParams.vsmLightBleedReduction,
         0,
         0
-      ], 52);
+      ], 56);
     } else if (this.shadowParams.method === 'SM') {
-      // Для SM: [bias, lightModeIndex, spotYaw, spotPitch]
       tmp.set([
         this.shadowParams.bias,
         lightModeIndex,
         this.spotYaw,
         this.spotPitch
-      ], 52);
+      ], 56);
     } else {
-      // PCF — оставляем старую упаковку (радиус, сэмплы, размер карты)
       tmp.set([
         this.shadowParams.bias,
         this.shadowParams.pcfRadius,
         this.shadowParams.pcfSamples,
         this.shadowParams.shadowMapSize
-      ], 52);
+      ], 56);
     }
 
     device.queue.writeBuffer(this.uniformBuf, 0, tmp.buffer);
+
     // Обновляем uniform для gizmo (оси объекта или света)
     if (this.selection !== 'none') {
       const axisModel = mat4.create();
@@ -1787,11 +2387,10 @@ export class Renderer {
       if (this.selection === 'object') {
         mat4.copy(axisModel, this.model);
       } else {
-        // Gizmo в центре света
         mat4.fromTranslation(axisModel, this.lightDir);
       }
 
-      const tmpAxis = new Float32Array(16 * 3 + 4 * 2);
+      const tmpAxis = new Float32Array(16 * 3 + 4 * 3);
       tmpAxis.set(axisModel, 0);
       tmpAxis.set(this.viewProj, 16);
       tmpAxis.set(this.lightViewProj, 32);
@@ -1801,7 +2400,13 @@ export class Renderer {
         lightPos[2],
         this.lightSelected ? 1 : 0
       ], 48);
-      tmpAxis.set(tmp.subarray(52, 56), 52);
+      tmpAxis.set([
+        camPos[0],
+        camPos[1],
+        camPos[2],
+        1.0
+      ], 52);
+      tmpAxis.set(tmp.subarray(56, 60), 56);
 
       device.queue.writeBuffer(this.axisUniformBuf, 0, tmpAxis.buffer);
     }
@@ -1815,7 +2420,7 @@ export class Renderer {
       const vsmPass = encoder.beginRenderPass({
         colorAttachments: [{
           view: this.vsmMomentsView,
-          clearValue: { r: 1.0, g: 1.0, b: 0.0, a: 1.0 },
+          clearValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
           loadOp: 'clear',
           storeOp: 'store'
         }],
@@ -1827,10 +2432,23 @@ export class Renderer {
         }
       });
       vsmPass.setPipeline(this.vsmMomentsPipeline);
-      vsmPass.setVertexBuffer(0, this.vbo);
-      vsmPass.setIndexBuffer(this.ibo, 'uint16');
       vsmPass.setBindGroup(0, this.bindGroup0VSMMoments);
-      vsmPass.drawIndexed(this.indexCount);
+
+      for (const obj of this.objects) {
+        if (!obj.castShadows) continue;
+
+        const mesh = this.meshes.find(m => m.id === obj.meshId) ?? this.meshes[0];
+        vsmPass.setVertexBuffer(0, mesh.vbo);
+        vsmPass.setIndexBuffer(mesh.ibo, 'uint16');
+
+        const modelMat = mat4.create();
+        mat4.fromTranslation(modelMat, obj.pos);
+        mat4.multiply(modelMat, modelMat, rotation);
+        device.queue.writeBuffer(this.uniformBuf, 0, modelMat as any);
+
+        vsmPass.drawIndexed(mesh.indexCount);
+      }
+
       vsmPass.end();
 
       const blurH = encoder.beginComputePass();
@@ -1851,13 +2469,22 @@ export class Renderer {
         }
       });
       shadowPass.setPipeline(this.shadowPipeline);
-
-      // Основная геометрия (indexed)
-      shadowPass.setVertexBuffer(0, this.vbo);
-      shadowPass.setIndexBuffer(this.ibo, 'uint16');
       shadowPass.setBindGroup(0, this.bindGroup0Shadow);
-      shadowPass.drawIndexed(this.indexCount);
 
+      for (const obj of this.objects) {
+        if (!obj.castShadows) continue;
+
+        const mesh = this.meshes.find(m => m.id === obj.meshId) ?? this.meshes[0];
+        shadowPass.setVertexBuffer(0, mesh.vbo);
+        shadowPass.setIndexBuffer(mesh.ibo, 'uint16');
+
+        const modelMat = mat4.create();
+        mat4.fromTranslation(modelMat, obj.pos);
+        mat4.multiply(modelMat, modelMat, rotation);
+        device.queue.writeBuffer(this.uniformBuf, 0, modelMat as any);
+
+        shadowPass.drawIndexed(mesh.indexCount);
+      }
       shadowPass.end();
     }
 
@@ -1882,12 +2509,6 @@ export class Renderer {
       }
     });
     mainPass.setPipeline(currentPipeline);
-    mainPass.setVertexBuffer(0, this.vbo);
-    mainPass.setVertexBuffer(1, this.nbo);
-    mainPass.setIndexBuffer(this.ibo, 'uint16');
-    mainPass.setVertexBuffer(0, this.vbo);
-    mainPass.setVertexBuffer(1, this.nbo);
-    mainPass.setVertexBuffer(2, this.tbo);
     mainPass.setBindGroup(0, this.bindGroup0Main);
     mainPass.setBindGroup(1, this.bindGroup1Main);
     mainPass.setBindGroup(2, this.objTexBindGroup);
@@ -1896,7 +2517,31 @@ export class Renderer {
       mainPass.setBindGroup(3, this.shadingBindGroupMain);
     }
 
-    mainPass.drawIndexed(this.indexCount);
+    for (const obj of this.objects) {
+      const mesh = this.meshes.find(m => m.id === obj.meshId) ?? this.meshes[0];
+      mainPass.setVertexBuffer(0, mesh.vbo);
+      mainPass.setVertexBuffer(1, mesh.nbo);
+      mainPass.setVertexBuffer(2, mesh.tbo);
+      mainPass.setIndexBuffer(mesh.ibo, 'uint16');
+
+      const modelMat = mat4.create();
+      mat4.fromTranslation(modelMat, obj.pos);
+      mat4.multiply(modelMat, modelMat, rotation);
+      device.queue.writeBuffer(this.uniformBuf, 0, modelMat as any);
+
+      const objParams = new Float32Array(8);
+      objParams[0] = obj.color[0];
+      objParams[1] = obj.color[1];
+      objParams[2] = obj.color[2];
+      objParams[3] = obj.receiveShadows ? 1.0 : 0.0;
+      objParams[4] = obj.specular;
+      objParams[5] = obj.shininess;
+      objParams[6] = 0.0;
+      objParams[7] = 0.0;
+      device.queue.writeBuffer(this.objectParamsBuf, 0, objParams);
+
+      mainPass.drawIndexed(mesh.indexCount);
+    }
     mainPass.end();
 
     // Grid pass
@@ -2021,10 +2666,16 @@ export class Renderer {
     this.cameraController.reset();
     this.updateViewProj();
 
+    // Сбрасываем объекты
+    this.initDefaultObjects();
+
     // Сбрасываем свет
     this.lightDir = vec3.fromValues(5, 10, 3);
-    this.updateLightViewProj();
+    this.lightMode = 'sun';
+    this.lightIntensity = 1.0;
     this.initSpotOrientationFromPosition();
+    this.initDefaultLights();
+    this.updateLightViewProj();
 
     // Сбрасываем тип света и силу теней
     this.lightMode = 'sun';
@@ -2048,6 +2699,12 @@ export class Renderer {
   resetModel() {
     // Возвращаем дефолтную геометрию (куб)
     this.createGeometry();
+
+    // Все объекты снова используют куб
+    for (const obj of this.objects) {
+      obj.meshId = this.defaultMeshId;
+    }
+
     console.log('✓ Model reset to default cube');
   }
 
@@ -2061,36 +2718,57 @@ export class Renderer {
 
       const { device } = this.gpu;
 
-      // Обновляем буферы
-      if (this.vbo) this.vbo.destroy();
-      if (this.nbo) this.nbo.destroy();
-      if (this.ibo) this.ibo.destroy();
-
-      this.vbo = device.createBuffer({
+      // Создаём отдельные буферы для нового меша
+      const vbo = device.createBuffer({
         size: model.positions.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
       });
-      device.queue.writeBuffer(this.vbo, 0, model.positions.buffer);
+      device.queue.writeBuffer(vbo, 0, model.positions.buffer);
 
-      this.nbo = device.createBuffer({
+      const nbo = device.createBuffer({
         size: model.normals.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
       });
-      device.queue.writeBuffer(this.nbo, 0, model.normals.buffer);
+      device.queue.writeBuffer(nbo, 0, model.normals.buffer);
 
-      this.ibo = device.createBuffer({
+      const ibo = device.createBuffer({
         size: model.indices.byteLength,
         usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
       });
-      device.queue.writeBuffer(this.ibo, 0, model.indices.buffer);
+      device.queue.writeBuffer(ibo, 0, model.indices.buffer);
 
-      this.indexCount = model.indices.length;
+      const indexCount = model.indices.length;
 
-      console.log(`✓ Loaded OBJ: ${model.positions.length / 3} vertices, ${model.indices.length / 3} triangles`);
+      // Новый id меша
+      const newId = this.meshes.length
+        ? this.meshes[this.meshes.length - 1].id + 1
+        : 0;
+
+      const mesh: MeshDef = {
+        id: newId,
+        name: file.name,
+        vbo,
+        nbo,
+        // Временно используем UV-буфер куба для всех мешей
+        tbo: this.tbo,
+        ibo,
+        indexCount
+      };
+
+      this.meshes.push(mesh);
+
+      // Назначаем новую модель активному объекту
+      const obj = this.objects[this.activeObjectIndex];
+      if (obj) {
+        obj.meshId = newId;
+      }
+
+      console.log(
+        `✓ Loaded OBJ mesh #${newId}: ${model.positions.length / 3} vertices, ${indexCount / 3} triangles`
+      );
     } catch (e) {
       console.error('Failed to load OBJ:', e);
       alert(`Ошибка загрузки модели: ${e}`);
     }
   }
-
 }

@@ -17,8 +17,10 @@ struct Uniforms {
   viewProj: mat4x4<f32>,
   lightViewProj: mat4x4<f32>,
   lightDir: vec4<f32>,
+  cameraPos: vec4<f32>,
   shadowParams: vec4<f32>,
 };
+
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
 const PI: f32 = 3.14159265;
@@ -39,7 +41,7 @@ struct ShadingParams {
   spotPitch: f32,
   methodIndex: f32,
   lightIntensity: f32,
-  _pad1: f32,
+  shadowCaster: f32,
   _pad2: f32,
 };
 
@@ -63,7 +65,23 @@ const POISSON_16: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
   vec2<f32>(-0.888, 0.444), vec2<f32>(0.111, -0.111),
 );
 
+struct Light {
+  pos: vec3<f32>,
+  lightType: f32,  // 0 = sun, 1 = spot, 2 = top
+  yaw: f32,
+  pitch: f32,
+  intensity: f32,
+  color: vec3<f32>,
+};
+
+struct LightsData {
+  count: f32,
+  _pad0: vec3<f32>,
+  lights: array<Light, 4>,
+};
+
 @group(3) @binding(0) var<uniform> shading: ShadingParams;
+@group(3) @binding(1) var<uniform> lightsData: LightsData;
 
 @vertex
 fn vs_main(input: VSIn) -> VSOut {
@@ -132,20 +150,15 @@ fn shadowVisibilityFloor(lightSpacePos: vec4<f32>) -> f32 {
   return select(shadow, 1.0, !inBounds);
 }
 
-@fragment
-fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
-  // Процедурная сетка (линии)
-  let gridSize = 1.0;
-  let coord = input.worldPos.xz / gridSize;
-  let grid = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
-  let line = min(grid.x, grid.y);
-  let gridAlpha = 1.0 - min(line, 1.0);
-  
-    // Освещение для grid (учитываем режим света и прожектор)
-  let N = normalize(input.worldN);
-  let lightPos = u.lightDir.xyz;
-
-  let mode = i32(round(shading.lightMode));
+fn computeLightContributionFloor(
+  N: vec3<f32>,
+  worldPos: vec3<f32>,
+  light: Light,
+  isShadowed: bool,
+  lightSpacePos: vec4<f32>
+) -> f32 {
+  let lightPos = light.pos;
+  let mode = i32(round(light.lightType));
 
   var L: vec3<f32>;
   var lambert: f32;
@@ -154,19 +167,16 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     L = normalize(vec3<f32>(0.0, 1.0, 0.0));
     lambert = max(dot(N, L), 0.0);
   } else if (mode == LIGHT_MODE_SPOT) {
-    // Прожектор: направление задаётся yaw/pitch
-    let yaw = shading.spotYaw;
-    let pitch = shading.spotPitch;
-
+    let yaw = light.yaw;
+    let pitch = light.pitch;
     let axis = vec3<f32>(
       cos(pitch) * sin(yaw),
       sin(pitch),
       cos(pitch) * cos(yaw)
     );
 
-    let toFrag = normalize(input.worldPos - lightPos); // из света к полу
-    L = normalize(lightPos - input.worldPos);          // из пола к свету
-
+    let toFrag = normalize(worldPos - lightPos);
+    L = normalize(lightPos - worldPos);
     lambert = max(dot(N, L), 0.0);
 
     let cosAngle = dot(toFrag, axis);
@@ -177,39 +187,74 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     let tSpot = clamp((cosAngle - outer) / (inner - outer), 0.0, 1.0);
     lambert = lambert * tSpot;
   } else {
-    // Sun: directional от позиции света
     L = normalize(lightPos);
     lambert = max(dot(N, L), 0.0);
   }
 
-  let rawVisibility = shadowVisibilityFloor(input.lightSpacePos);
+  var vis: f32 = 1.0;
+  if (isShadowed) {
+    let rawVisibility = shadowVisibilityFloor(lightSpacePos);
 
+    let strength = clamp(shading.shadowStrength, 0.0, 2.0);
+    let t = clamp(strength, 0.0, 1.0);
+    vis = mix(1.0, rawVisibility, t);
+
+    if (strength > 1.0) {
+      let extra = strength - 1.0;
+      vis = max(0.0, vis * (1.0 - extra));
+    }
+  }
+
+  let intensity = max(light.intensity, 0.0);
+  return lambert * vis * intensity;
+}
+
+@fragment
+fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
+  // Процедурная сетка (линии)
+  let gridSize = 1.0;
+  let coord = input.worldPos.xz / gridSize;
+  let grid = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
+  let line = min(grid.x, grid.y);
+  let gridAlpha = 1.0 - min(line, 1.0);
+
+  // Всегда сэмплируем текстуру (uniform control flow)
   let texColor = textureSample(floorTex, floorSampler, input.uv).xyz;
   let isFloor = abs(input.worldN.y - 1.0) < 0.5;
 
   var baseColor: vec3<f32>;
   if (isFloor) {
     baseColor = gridParams.floorColor * texColor;
-
     let gridLineColor = vec3<f32>(0.7, 0.75, 0.8);
     baseColor = mix(baseColor, gridLineColor, gridAlpha);
   } else {
     baseColor = gridParams.wallColor;
   }
 
+  let N = normalize(input.worldN);
+  let worldPos = input.worldPos;
   let ambient = 0.4;
-  let strength = clamp(shading.shadowStrength, 0.0, 2.0);
 
-  let t = clamp(strength, 0.0, 1.0);
-  var vis = mix(1.0, rawVisibility, t);
+  let lightCount = i32(round(lightsData.count));
+  var diffuseSum: vec3<f32> = vec3<f32>(0.0);
+  let caster = i32(round(shading.shadowCaster));
 
-  if (strength > 1.0) {
-    let extra = strength - 1.0;
-    vis = max(0.0, vis * (1.0 - extra));
+  for (var i = 0; i < lightCount; i = i + 1) {
+    let light = lightsData.lights[i];
+    let isShadowed = (i == caster);
+
+    let contrib = computeLightContributionFloor(
+      N,
+      worldPos,
+      light,
+      isShadowed,
+      input.lightSpacePos
+    );
+    diffuseSum = diffuseSum + contrib * light.color;
   }
 
-  let intensity = max(shading.lightIntensity, 0.0);
-  let diffuse = (1.0 - ambient) * lambert * vis * intensity;
-  let finalColor = baseColor * clamp(ambient + diffuse, 0.0, 1.0);
+  let diffuse = (1.0 - ambient) * diffuseSum;
+  let lighting = clamp(ambient + diffuse, vec3<f32>(0.0), vec3<f32>(1.0));
+  let finalColor = baseColor * lighting;
   return vec4<f32>(finalColor, 1.0);
 }

@@ -7,11 +7,12 @@ struct VSOut {
 };
 
 struct Uniforms {
-  model        : mat4x4<f32>,
-  viewProj     : mat4x4<f32>,
+  model: mat4x4<f32>,
+  viewProj: mat4x4<f32>,
   lightViewProj: mat4x4<f32>,
-  lightDir     : vec4<f32>,
-  shadowParams : vec4<f32>,
+  lightDir: vec4<f32>,
+  cameraPos: vec4<f32>,
+  shadowParams: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u : Uniforms;
@@ -19,9 +20,8 @@ struct Uniforms {
 @vertex
 fn vs_main(input: VSIn) -> VSOut {
   var out : VSOut;
-  let lightPos = u.lightDir.xyz;
-  // geometry задаётся в локальных координатах вокруг источника
-  let worldPos = input.position + lightPos;
+  // Позиция вершины уже в мировых координатах
+  let worldPos = input.position;
   out.clipPos = u.viewProj * vec4<f32>(worldPos, 1.0);
   return out;
 }

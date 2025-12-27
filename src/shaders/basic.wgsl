@@ -17,7 +17,13 @@ struct Uniforms {
   viewProj: mat4x4<f32>,
   lightViewProj: mat4x4<f32>,
   lightDir: vec4<f32>,
+  cameraPos: vec4<f32>,
   shadowParams: vec4<f32>,
+};
+
+struct ObjectParams {
+  base: vec4<f32>, // xyz: color, w: receiveShadows
+  spec: vec4<f32>, // x: specStrength, y: shininess, z,w: резерв
 };
 
 const PI: f32 = 3.14159265;
@@ -26,6 +32,7 @@ const LIGHT_MODE_SPOT: i32 = 1;
 const LIGHT_MODE_TOP: i32 = 2;
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
+@group(0) @binding(1) var<uniform> objParams: ObjectParams;
 
 @group(1) @binding(0) var shadowMap: texture_depth_2d;
 @group(1) @binding(1) var shadowSampler: sampler_comparison;
@@ -40,12 +47,27 @@ struct ShadingParams {
   spotPitch: f32,
   methodIndex: f32,
   lightIntensity: f32,
-  _pad1: f32,
+  shadowCaster: f32,
   _pad2: f32,
 };
 
-@group(3) @binding(0) var<uniform> shading: ShadingParams;
+struct Light {
+  pos: vec3<f32>,
+  lightType: f32,  // 0 = sun, 1 = spot, 2 = top
+  yaw: f32,
+  pitch: f32,
+  intensity: f32,
+  color: vec3<f32>,
+};
 
+struct LightsData {
+  count: f32,
+  _pad0: vec3<f32>,
+  lights: array<Light, 4>,
+};
+
+@group(3) @binding(0) var<uniform> shading: ShadingParams;
+@group(3) @binding(1) var<uniform> lightsData: LightsData;
 
 @vertex
 fn vs_main(input: VSIn) -> VSOut {
@@ -73,46 +95,45 @@ fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
   return select(shadow, 1.0, !inBounds);
 }
 
-@fragment
-fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
-    let N = normalize(input.worldN);
-  let lightPos = u.lightDir.xyz;
+fn computeLightContribution(
+  N: vec3<f32>,
+  worldPos: vec3<f32>,
+  light: Light,
+  isShadowed: bool,
+  lightSpacePos: vec4<f32>
+) -> f32 {
+  let PI: f32 = 3.14159265;
+  let LIGHT_MODE_SUN: i32 = 0;
+  let LIGHT_MODE_SPOT: i32 = 1;
+  let LIGHT_MODE_TOP: i32 = 2;
 
-  let mode = i32(round(shading.lightMode)); // 0=sun,1=spot,2=top
+  let lightPos = light.pos;
+  let mode = i32(round(light.lightType));
 
   var L: vec3<f32>;
   var lambert: f32;
 
-    if (mode == LIGHT_MODE_TOP) {
-    // Верхний свет: идёт СВЕРХУ, значит направление к свету для фрагмента — вверх
+  if (mode == LIGHT_MODE_TOP) {
     L = normalize(vec3<f32>(0.0, 1.0, 0.0));
     lambert = max(dot(N, L), 0.0);
   } else if (mode == LIGHT_MODE_SPOT) {
-    // Прожектор: позиция фиксирована, направление задаётся yaw/pitch
-    let yaw = shading.spotYaw;
-    let pitch = shading.spotPitch;
-
-    // Ось прожектора (из света в сцену)
+    let yaw = light.yaw;
+    let pitch = light.pitch;
     let axis = vec3<f32>(
       cos(pitch) * sin(yaw),
       sin(pitch),
       cos(pitch) * cos(yaw)
     );
 
-    // Направление к фрагменту из света и наоборот
-    let toFrag = normalize(input.worldPos - lightPos);   // из света к фрагменту
-    L = normalize(lightPos - input.worldPos);            // из фрагмента к свету
-
+    let toFrag = normalize(worldPos - lightPos);
+    L = normalize(lightPos - worldPos);
     lambert = max(dot(N, L), 0.0);
 
-    // Spot falloff по углу между осью и направлением к фрагменту
     let cosAngle = dot(toFrag, axis);
-
     let innerDeg: f32 = 15.0;
     let outerDeg: f32 = 25.0;
     let inner = cos(innerDeg * PI / 180.0);
     let outer = cos(outerDeg * PI / 180.0);
-
     let tSpot = clamp((cosAngle - outer) / (inner - outer), 0.0, 1.0);
     lambert = lambert * tSpot;
   } else {
@@ -121,30 +142,68 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     lambert = max(dot(N, L), 0.0);
   }
 
-  let rawVisibility = shadowVisibility(input.lightSpacePos);
+  var vis: f32 = 1.0;
+  if (isShadowed) {
+    let rawVisibility = shadowVisibility(lightSpacePos);
 
-  // Цвет объекта из текстуры (sRGB можно игнорировать для простоты)
-  var baseColor = vec3<f32>(0.55, 0.57, 0.6);
+    let strength = clamp(shading.shadowStrength, 0.0, 2.0);
+    let t = clamp(strength, 0.0, 1.0);
+    vis = mix(1.0, rawVisibility, t);
+
+    if (strength > 1.0) {
+      let extra = strength - 1.0;
+      vis = max(0.0, vis * (1.0 - extra));
+    }
+  }
+
+  // Спекуляр (Blinn-Phong)
+  let viewDir = normalize(u.cameraPos.xyz - worldPos);
+  let halfVec = normalize(L + viewDir);
+  let specAngle = max(dot(N, halfVec), 0.0);
+  let shininess = max(objParams.spec.y, 1.0);
+  let specular = pow(specAngle, shininess);
+
+  let intensity = max(light.intensity, 0.0);
+  let diffuseTerm = lambert * vis * intensity;
+  let specFactor = max(objParams.spec.x, 0.0);
+  let specTerm = specular * vis * intensity * specFactor;
+
+  return diffuseTerm + specTerm;
+}
+
+@fragment
+fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
+  let N = normalize(input.worldN);
+  let worldPos = input.worldPos;
+
+  // Цвет объекта из текстуры
+  var baseColor = objParams.base.xyz;
   let texColor = textureSample(objTex, objSampler, input.uv).xyz;
-  baseColor = mix(baseColor, texColor, 1.0);
+  baseColor = baseColor * texColor;
 
   let ambient = 0.55;
 
-  // strength: 0..2
-  let strength = clamp(shading.shadowStrength, 0.0, 2.0);
+  let lightCount = i32(round(lightsData.count));
+  var diffuseSum: vec3<f32> = vec3<f32>(0.0);
+  let caster = i32(round(shading.shadowCaster));
+  let receive = objParams.base.w;
 
-  // 0..1 — ослабляем тени, плавно двигая vis от 1 к rawVisibility
-  let t = clamp(strength, 0.0, 1.0);
-  var vis = mix(1.0, rawVisibility, t);
+  for (var i = 0; i < lightCount; i = i + 1) {
+    let light = lightsData.lights[i];
+    let isShadowed = (i == caster) && (receive > 0.5);
 
-  // 1..2 — усиливаем тени: дополнительно тянем vis к 0
-  if (strength > 1.0) {
-    let extra = strength - 1.0;           // 0..1
-    vis = max(0.0, vis * (1.0 - extra));  // при 2 → vis ~ 0
+    let contrib = computeLightContribution(
+      N,
+      worldPos,
+      light,
+      isShadowed,
+      input.lightSpacePos
+    );
+    diffuseSum = diffuseSum + contrib * light.color;
   }
 
-  let intensity = max(shading.lightIntensity, 0.0);
-  let diffuse = (1.0 - ambient) * lambert * vis * intensity;
-  let finalColor = baseColor * clamp(ambient + diffuse, 0.0, 1.0);
+  let diffuse = (1.0 - ambient) * diffuseSum;
+  let lighting = clamp(ambient + diffuse, vec3<f32>(0.0), vec3<f32>(1.0));
+  let finalColor = baseColor * lighting;
   return vec4<f32>(finalColor, 1.0);
 }

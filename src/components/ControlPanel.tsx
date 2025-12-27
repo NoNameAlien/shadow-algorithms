@@ -29,6 +29,35 @@ type Props = {
     onLightIntensityChange: (value: number) => void;
     showLightBeam: boolean;
     onShowLightBeamChange: (value: boolean) => void;
+    lightColor: string;
+    onLightColorChange: (hex: string) => void;
+    lightCount: number;
+    activeLightIndex: number;
+    onSelectLight: (index: number) => void;
+    onAddLight: () => void;
+    onRemoveLight: () => void;
+    objectCount: number;
+    activeObjectIndex: number;
+    onSelectObject: (index: number) => void;
+    onAddObject: () => void;
+    onRemoveObject: () => void;
+    onSaveScene?: () => void;
+    onLoadSceneFile?: (file: File) => void;
+    objectColor: string;
+    onObjectColorChange: (hex: string) => void;
+    objectCastShadows: boolean;
+    onObjectCastShadowsChange: (value: boolean) => void;
+    objectReceiveShadows: boolean;
+    onObjectReceiveShadowsChange: (value: boolean) => void;
+    lightCastShadows: boolean;
+    onLightCastShadowsChange: (value: boolean) => void;
+    meshOptions: { id: number; name: string }[];
+    activeMeshId: number;
+    onObjectMeshChange: (meshId: number) => void;
+    objectSpecular: number;
+    onObjectSpecularChange: (value: number) => void;
+    objectShininess: number;
+    onObjectShininessChange: (value: number) => void;
 };
 
 const INITIAL_PARAMS: ShadowParams = {
@@ -88,6 +117,8 @@ const STRINGS = {
         objectMoveSpeed: 'Object move speed',
         lightIntensity: 'Light intensity',
         lightBeamShow: 'Show light beam',
+        lightsLabel: 'Lights',
+        objectsLabel: 'Objects',
     },
     ru: {
         title: 'Настройки теней',
@@ -119,6 +150,8 @@ const STRINGS = {
         objectMoveSpeed: 'Скорость перемещения объекта',
         lightIntensity: 'Яркость света',
         lightBeamShow: 'Показывать луч источника',
+        lightsLabel: 'Источники света',
+        objectsLabel: 'Объекты',
     }
 } as const;
 
@@ -150,13 +183,44 @@ export function ControlPanel({
     lightIntensity,
     onLightIntensityChange,
     showLightBeam,
-    onShowLightBeamChange
+    onShowLightBeamChange,
+    lightColor,
+    onLightColorChange,
+    lightCastShadows,
+    onLightCastShadowsChange,
+    lightCount,
+    activeLightIndex,
+    onSelectLight,
+    onAddLight,
+    onRemoveLight,
+    objectCount,
+    activeObjectIndex,
+    onSelectObject,
+    onAddObject,
+    onRemoveObject,
+    onSaveScene,
+    onLoadSceneFile,
+    objectColor,
+    onObjectColorChange,
+    objectCastShadows,
+    onObjectCastShadowsChange,
+    objectReceiveShadows,
+    onObjectReceiveShadowsChange,
+    meshOptions,
+    activeMeshId,
+    onObjectMeshChange,
+    objectSpecular,
+    onObjectSpecularChange,
+    objectShininess,
+    onObjectShininessChange
 }: Props) {
     const [params, setParams] = useState<ShadowParams>(INITIAL_PARAMS);
     const [modelName, setModelName] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const objTexInputRef = useRef<HTMLInputElement | null>(null);
     const floorTexInputRef = useRef<HTMLInputElement | null>(null);
+    const sceneFileInputRef = useRef<HTMLInputElement | null>(null);
+
     const [showHints, setShowHints] = useState(false);
     const t = STRINGS[lang];
 
@@ -274,6 +338,249 @@ export function ControlPanel({
                 </div>
             </div>
 
+            {/* Блок: источники света */}
+            <div
+                style={{
+                    padding: 10,
+                    borderRadius: 8,
+                    background: '#1e222b',
+                    border: '1px solid #262a32',
+                    marginBottom: 10
+                }}
+            >
+                <div style={{ fontSize: 13, marginBottom: 6, opacity: 0.85 }}>
+                    {t.lightsLabel} ({lightCount})
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                    {Array.from({ length: lightCount }, (_, i) => (
+                        <button
+                            key={i}
+                            type="button"
+                            onClick={() => onSelectLight(i)}
+                            style={{
+                                minWidth: 32,
+                                padding: '3px 6px',
+                                fontSize: 12,
+                                borderRadius: 6,
+                                border: '1px solid #343b4a',
+                                background: activeLightIndex === i ? '#3b5bdb' : '#252a34',
+                                color: '#e6e6e6',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            L{i + 1}
+                        </button>
+                    ))}
+                    <button
+                        type="button"
+                        onClick={onAddLight}
+                        style={{
+                            padding: '3px 6px',
+                            fontSize: 12,
+                            borderRadius: 6,
+                            border: '1px solid #343b4a',
+                            background: '#2f9e44',
+                            color: '#e6e6e6',
+                            cursor: 'pointer'
+                        }}
+                        title={lang === 'ru' ? 'Добавить источник' : 'Add light'}
+                    >
+                        +
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onRemoveLight}
+                        style={{
+                            padding: '3px 6px',
+                            fontSize: 12,
+                            borderRadius: 6,
+                            border: '1px solid #343b4a',
+                            background: lightCount > 1 ? '#c92a2a' : '#3b3b3b',
+                            color: '#e6e6e6',
+                            cursor: lightCount > 1 ? 'pointer' : 'not-allowed',
+                            opacity: lightCount > 1 ? 1 : 0.6
+                        }}
+                        title={lang === 'ru' ? 'Удалить источник (кроме первого)' : 'Remove light (except first)'}
+                    >
+                        −
+                    </button>
+                </div>
+            </div>
+
+            {/* Блок: объекты */}
+            <div
+                style={{
+                    padding: 10,
+                    borderRadius: 8,
+                    background: '#1e222b',
+                    border: '1px solid #262a32',
+                    marginBottom: 10
+                }}
+            >
+                <div style={{ fontSize: 13, marginBottom: 6, opacity: 0.85 }}>
+                    {lang === 'ru' ? 'Объекты' : 'Objects'} ({objectCount})
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                    {Array.from({ length: objectCount }, (_, i) => (
+                        <button
+                            key={i}
+                            type="button"
+                            onClick={() => onSelectObject(i)}
+                            style={{
+                                minWidth: 32,
+                                padding: '3px 6px',
+                                fontSize: 12,
+                                borderRadius: 6,
+                                border: '1px solid #343b4a',
+                                background: activeObjectIndex === i ? '#3b5bdb' : '#252a34',
+                                color: '#e6e6e6',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            O{i + 1}
+                        </button>
+                    ))}
+                    <button
+                        type="button"
+                        onClick={onAddObject}
+                        style={{
+                            padding: '3px 6px',
+                            fontSize: 12,
+                            borderRadius: 6,
+                            border: '1px solid #343b4a',
+                            background: '#2f9e44',
+                            color: '#e6e6e6',
+                            cursor: 'pointer'
+                        }}
+                        title={lang === 'ru' ? 'Добавить объект' : 'Add object'}
+                    >
+                        +
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onRemoveObject}
+                        style={{
+                            padding: '3px 6px',
+                            fontSize: 12,
+                            borderRadius: 6,
+                            border: '1px solid #343b4a',
+                            background: objectCount > 1 ? '#c92a2a' : '#3b3b3b',
+                            color: '#e6e6e6',
+                            cursor: objectCount > 1 ? 'pointer' : 'not-allowed',
+                            opacity: objectCount > 1 ? 1 : 0.6
+                        }}
+                        title={lang === 'ru' ? 'Удалить объект (кроме первого)' : 'Remove object (except first)'}
+                    >
+                        −
+                    </button>
+                </div>
+            </div>
+
+            {/* Блок: параметры активного объекта */}
+            <div
+                style={{
+                    padding: 10,
+                    borderRadius: 8,
+                    background: '#1e222b',
+                    border: '1px solid #262a32',
+                    marginBottom: 10
+                }}
+            >
+                <div style={{ fontSize: 13, marginBottom: 6, opacity: 0.85 }}>
+                    {lang === 'ru' ? 'Параметры объекта' : 'Object params'}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 13 }}>
+                        {lang === 'ru' ? 'Цвет объекта' : 'Object color'}
+                    </span>
+                    <input
+                        type="color"
+                        value={objectColor}
+                        onChange={(e) => onObjectColorChange(e.target.value)}
+                        style={{ width: 32, height: 20, padding: 0, border: 'none', cursor: 'pointer' }}
+                    />
+                </div>
+
+                <label style={{ display: 'block', marginBottom: 6 }}>
+                    <span style={{ fontSize: 13 }}>
+                        {lang === 'ru' ? 'Модель объекта' : 'Object model'}
+                    </span>
+                    <select
+                        value={activeMeshId}
+                        onChange={(e) => onObjectMeshChange(Number(e.target.value))}
+                        style={{
+                            width: '100%',
+                            display: 'block',
+                            marginTop: 4,
+                            padding: 4,
+                            background: '#252a34',
+                            color: '#e6e6e6',
+                            border: '1px solid #343b4a',
+                            borderRadius: 4,
+                            fontSize: 14
+                        }}
+                    >
+                        {meshOptions.map((m) => (
+                            <option key={m.id} value={m.id}>
+                                {m.name || `Mesh ${m.id}`}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+
+                <label style={{ display: 'block', marginBottom: 6 }}>
+                    <span style={{ fontSize: 13 }}>
+                        {lang === 'ru'
+                            ? `Сила блика: ${objectSpecular.toFixed(2)}`
+                            : `Specular strength: ${objectSpecular.toFixed(2)}`}
+                    </span>
+                    <input
+                        type="range"
+                        min={0}
+                        max={2}
+                        step={0.05}
+                        value={objectSpecular}
+                        onChange={(e) => onObjectSpecularChange(+e.target.value)}
+                        style={{ width: '100%', display: 'block', marginTop: 4 }}
+                    />
+                </label>
+
+                <label style={{ display: 'block', marginBottom: 6 }}>
+                    <span style={{ fontSize: 13 }}>
+                        {lang === 'ru'
+                            ? `Гладкость (shininess): ${objectShininess.toFixed(0)}`
+                            : `Shininess: ${objectShininess.toFixed(0)}`}
+                    </span>
+                    <input
+                        type="range"
+                        min={4}
+                        max={128}
+                        step={1}
+                        value={objectShininess}
+                        onChange={(e) => onObjectShininessChange(+e.target.value)}
+                        style={{ width: '100%', display: 'block', marginTop: 4 }}
+                    />
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4 }}>
+                    <input
+                        type="checkbox"
+                        checked={objectCastShadows}
+                        onChange={(e) => onObjectCastShadowsChange(e.target.checked)}
+                    />
+                    {lang === 'ru' ? 'Кидать тени' : 'Cast shadows'}
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                    <input
+                        type="checkbox"
+                        checked={objectReceiveShadows}
+                        onChange={(e) => onObjectReceiveShadowsChange(e.target.checked)}
+                    />
+                    {lang === 'ru' ? 'Принимать тени' : 'Receive shadows'}
+                </label>
+            </div>
+
             {/* Блок: тип света */}
             <div
                 style={{
@@ -334,6 +641,27 @@ export function ControlPanel({
                         onChange={(e) => onLightIntensityChange(+e.target.value)}
                         style={{ width: '100%', display: 'block', marginTop: 4 }}
                     />
+                </label>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 13 }}>
+                        {lang === 'ru' ? 'Цвет света' : 'Light color'}
+                    </span>
+                    <input
+                        type="color"
+                        value={lightColor}
+                        onChange={(e) => onLightColorChange(e.target.value)}
+                        style={{ width: 32, height: 20, padding: 0, border: 'none', cursor: 'pointer' }}
+                    />
+                </div>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4 }}>
+                    <input
+                        type="checkbox"
+                        checked={lightCastShadows}
+                        onChange={(e) => onLightCastShadowsChange(e.target.checked)}
+                    />
+                    {lang === 'ru' ? 'Этот источник кидает тени' : 'This light casts shadows'}
                 </label>
 
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
@@ -811,6 +1139,62 @@ export function ControlPanel({
                 />
             </div>
 
+            {/* Блок: сохранить / загрузить сцену */}
+            <div
+                style={{
+                    marginBottom: 8,
+                    display: 'flex',
+                    gap: 6
+                }}
+            >
+                <button
+                    type="button"
+                    onClick={onSaveScene}
+                    style={{
+                        flex: 1,
+                        padding: 6,
+                        background: '#228be6',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        fontSize: 13,
+                        fontWeight: 600
+                    }}
+                >
+                    {lang === 'ru' ? 'Сохранить сцену' : 'Save scene'}
+                </button>
+                <button
+                    type="button"
+                    onClick={() => sceneFileInputRef.current?.click()}
+                    style={{
+                        flex: 1,
+                        padding: 6,
+                        background: '#495057',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        fontSize: 13,
+                        fontWeight: 600
+                    }}
+                >
+                    {lang === 'ru' ? 'Загрузить сцену' : 'Load scene'}
+                </button>
+                <input
+                    ref={sceneFileInputRef}
+                    type="file"
+                    accept="application/json"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file && onLoadSceneFile) {
+                            onLoadSceneFile(file);
+                        }
+                    }}
+                />
+            </div>
+
             {/* Кнопка Reset */}
             <button
                 onClick={() => {
@@ -824,7 +1208,6 @@ export function ControlPanel({
                     onFloorColorChange('#26282d');
                     onWallColorChange('#1f2226');
 
-                    onWallColorChange('#1f2226');
                     onObjectMoveSpeedChange(1.0);
                     onLightIntensityChange(1.0);
                     onShowLightBeamChange(true);
