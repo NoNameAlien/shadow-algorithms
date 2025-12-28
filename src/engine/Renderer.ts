@@ -156,6 +156,8 @@ export class Renderer {
   private shadowSize = 2048;
   private shadowTex!: GPUTexture;
   private shadowView!: GPUTextureView;
+  private shadowTex1!: GPUTexture;
+  private shadowView1!: GPUTextureView;
   private shadowSampler!: GPUSampler;       // общий sampler_comparison
   private shadowSamplerLinear!: GPUSampler; // для PCSS
 
@@ -225,6 +227,7 @@ export class Renderer {
   private shadingBindGroupGrid!: GPUBindGroup;
   private lightsBuf!: GPUBuffer;
   private objectParamsBuf!: GPUBuffer;
+  private shadowMatsBuf!: GPUBuffer;
 
   private objTexture!: GPUTexture;
   private objTextureView!: GPUTextureView;
@@ -305,6 +308,15 @@ export class Renderer {
     if (this.lights.length === 0) return;
     const clamped = Math.max(0, Math.min(index, this.lights.length - 1));
     this.activeLightIndex = clamped;
+
+    const l = this.lights[clamped];
+    // Синхронизируем глобальные поля под активный свет
+    this.lightMode = l.type;
+    this.lightIntensity = l.intensity;
+    vec3.copy(this.lightDir, l.pos);
+    this.spotYaw = l.yaw;
+    this.spotPitch = l.pitch;
+    this.updateLightViewProj();
   }
 
   // Добавить новый источник (возвращает его индекс)
@@ -618,6 +630,17 @@ export class Renderer {
     return -1;
   }
 
+  private getShadowCasters(max: number): number[] {
+    const result: number[] = [];
+    for (let i = 0; i < this.lights.length; i++) {
+      if (this.lights[i].castShadows) {
+        result.push(i);
+        if (result.length >= max) break;
+      }
+    }
+    return result;
+  }
+
   private initDefaultLights() {
     this.lights = [];
     const main: LightDef = {
@@ -903,12 +926,22 @@ export class Renderer {
       }
     }
 
-    const lightCenter = this.lightDir; // главный теневой свет
+    // Поиск ближайшего источника света
     const lightRadius = 0.9;
-    const tLight = this.raySphereHit(rayOrigin, rayDir, lightCenter, lightRadius);
+    let bestLightT = Number.POSITIVE_INFINITY;
+    let bestLightIndex = -1;
+
+    for (let i = 0; i < this.lights.length; i++) {
+      const center = this.lights[i].pos;
+      const t = this.raySphereHit(rayOrigin, rayDir, center, lightRadius);
+      if (t < bestLightT) {
+        bestLightT = t;
+        bestLightIndex = i;
+      }
+    }
 
     const hasObj = bestObjIndex !== -1;
-    const hasLight = tLight < Number.POSITIVE_INFINITY;
+    const hasLight = bestLightIndex !== -1;
 
     if (!hasObj && !hasLight) {
       this.setSelection('none');
@@ -916,7 +949,9 @@ export class Renderer {
     }
 
     if (hasObj && hasLight) {
-      if (tLight < bestObjT) {
+      // Берём то, что ближе по лучу
+      if (bestLightT < bestObjT) {
+        this.setActiveLight(bestLightIndex);
         this.setSelection('light');
       } else {
         this.activeObjectIndex = bestObjIndex;
@@ -928,6 +963,7 @@ export class Renderer {
     }
 
     if (hasLight) {
+      this.setActiveLight(bestLightIndex);
       this.setSelection('light');
       return;
     }
@@ -1078,13 +1114,24 @@ export class Renderer {
 
   private createShadowResources() {
     const { device } = this.gpu;
+
     if (this.shadowTex) this.shadowTex.destroy();
+    if (this.shadowTex1) this.shadowTex1.destroy();
+
     this.shadowTex = device.createTexture({
       size: [this.shadowSize, this.shadowSize],
       format: 'depth32float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
     });
     this.shadowView = this.shadowTex.createView();
+
+    // Вторая карта для второго теневого источника (SM)
+    this.shadowTex1 = device.createTexture({
+      size: [this.shadowSize, this.shadowSize],
+      format: 'depth32float',
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+    });
+    this.shadowView1 = this.shadowTex1.createView();
 
     this.shadowSampler = device.createSampler({
       compare: 'less',
@@ -1811,6 +1858,13 @@ export class Renderer {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
 
+    this.shadowMatsBuf = device.createBuffer({
+      // ShadowMatrices = (count + pad3 + 2*16) float32 = 36 * 4 = 144,
+      // но layout требует minBindingSize = 160 → берём с запасом
+      size: 160,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+
     this.lightsBuf = device.createBuffer({
       // count(4) + pad(12) + 4 * sizeof(Light)
       // Light = vec3 + f + f + f + f + vec3 = 16 * 4 bytes = 64
@@ -1842,7 +1896,8 @@ export class Renderer {
       layout: currentPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuf } },
-        { binding: 1, resource: { buffer: this.objectParamsBuf } }
+        { binding: 1, resource: { buffer: this.objectParamsBuf } },
+        { binding: 2, resource: { buffer: this.shadowMatsBuf } }
       ]
     });
 
@@ -1863,7 +1918,19 @@ export class Renderer {
           { binding: 1, resource: this.vsmSampler }
         ]
       });
+    } else if (this.shadowParams.method === 'SM') {
+      // SM: две карты теней и два сэмплера (один и тот же)
+      this.bindGroup1Main = device.createBindGroup({
+        layout: currentPipeline.getBindGroupLayout(1),
+        entries: [
+          { binding: 0, resource: this.shadowView },
+          { binding: 1, resource: this.shadowSampler },
+          { binding: 2, resource: this.shadowView1 },
+          { binding: 3, resource: this.shadowSampler }
+        ]
+      });
     } else {
+      // PCF: одна карта
       this.bindGroup1Main = device.createBindGroup({
         layout: currentPipeline.getBindGroupLayout(1),
         entries: [
@@ -1885,7 +1952,8 @@ export class Renderer {
       layout: this.gridPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuf } },
-        { binding: 1, resource: { buffer: this.gridParamsBuf } }
+        { binding: 1, resource: { buffer: this.gridParamsBuf } },
+        { binding: 2, resource: { buffer: this.shadowMatsBuf } }
       ]
     });
 
@@ -1993,12 +2061,7 @@ export class Renderer {
   }
 
   private updateLightViewProj() {
-    let casterIndex = this.getShadowCasterIndex();
-    if (casterIndex < 0 || casterIndex >= this.lights.length) {
-      casterIndex = this.activeLightIndex;
-    }
-
-    const main = this.lights[casterIndex];
+    const main = this.lights[this.activeLightIndex];
     const pos = main ? main.pos : this.lightDir;
 
     const lightPos = vec3.clone(pos);
@@ -2022,7 +2085,37 @@ export class Renderer {
 
     mat4.multiply(this.lightViewProj, lightProj, lightView);
 
+    // lightDir = позиция активного источника (для оси/луча и т.п.)
     vec3.copy(this.lightDir, lightPos);
+  }
+
+  private computeLightViewProjFor(lightIndex: number): mat4 {
+    const res = mat4.create();
+    const l = this.lights[lightIndex];
+    if (!l) {
+      mat4.identity(res);
+      return res;
+    }
+    const lightPos = vec3.clone(l.pos);
+    const lightDirNorm = vec3.normalize(vec3.create(), lightPos);
+
+    let up = vec3.fromValues(0, 1, 0);
+    const dotUp = Math.abs(vec3.dot(lightDirNorm, [0, 1, 0]));
+    if (dotUp > 0.99) {
+      up = vec3.fromValues(0, 0, 1);
+    }
+
+    const view = mat4.create();
+    const proj = mat4.create();
+    mat4.lookAt(view, lightPos, [0, 0, 0], up);
+
+    const size = 8;
+    const near = 1.0;
+    const far = 20.0;
+    orthoZO(proj, -size, size, -size, size, near, far);
+
+    mat4.multiply(res, proj, view);
+    return res;
   }
 
   private updateLightBeamGeometry() {
@@ -2114,6 +2207,47 @@ export class Renderer {
     return { x: sx, y: sy, visible };
   }
 
+  getAllLightsScreenPositions(): { x: number; y: number; visible: boolean; mode: LightMode; active: boolean }[] {
+    const rect = this.canvas.getBoundingClientRect();
+    const result: { x: number; y: number; visible: boolean; mode: LightMode; active: boolean }[] = [];
+
+    for (let i = 0; i < this.lights.length; i++) {
+      const l = this.lights[i];
+      if (!l) continue;
+
+      const lightPos = l.pos;
+      const p = vec4.fromValues(lightPos[0], lightPos[1], lightPos[2], 1.0);
+      const clip = vec4.create();
+      vec4.transformMat4(clip, p, this.viewProj);
+      const w = clip[3];
+
+      if (w <= 0.0) {
+        result.push({ x: 0, y: 0, visible: false, mode: l.type, active: i === this.activeLightIndex });
+        continue;
+      }
+
+      const ndcX = clip[0] / w;
+      const ndcY = clip[1] / w;
+
+      const sx = (ndcX * 0.5 + 0.5) * rect.width;
+      const sy = (1 - (ndcY * 0.5 + 0.5)) * rect.height;
+
+      const visible =
+        ndcX >= -1.0 && ndcX <= 1.0 &&
+        ndcY >= -1.0 && ndcY <= 1.0;
+
+      result.push({
+        x: sx,
+        y: sy,
+        visible,
+        mode: l.type,
+        active: i === this.activeLightIndex
+      });
+    }
+
+    return result;
+  }
+
   getMeshesMeta() {
     return this.meshes.map(m => ({ id: m.id, name: m.name }));
   }
@@ -2156,15 +2290,9 @@ export class Renderer {
     const l = this.lights[this.activeLightIndex];
     if (!l) return;
 
-    if (value) {
-      // Только один источник кидает тени
-      this.lights.forEach((light, idx) => {
-        light.castShadows = (idx === this.activeLightIndex);
-      });
-    } else {
-      l.castShadows = false;
-    }
+    l.castShadows = value;
 
+    // Пересчёт теневой камеры: по-прежнему привязываем её к первому кастеру
     this.updateLightViewProj();
   }
 
@@ -2204,6 +2332,7 @@ export class Renderer {
     this.stop();
     if (this.depthTex) this.depthTex.destroy();
     if (this.shadowTex) this.shadowTex.destroy();
+    if (this.shadowTex1) this.shadowTex1.destroy();
     if (this.vsmMomentsTex) this.vsmMomentsTex.destroy();
     if (this.vsmBlurTex) this.vsmBlurTex.destroy();
     if (this.vbo) this.vbo.destroy();
@@ -2224,6 +2353,7 @@ export class Renderer {
     if (this.lightBeamIBO) this.lightBeamIBO.destroy();
     if (this.lightsBuf) this.lightsBuf.destroy();
     if (this.objectParamsBuf) this.objectParamsBuf.destroy();
+    if (this.shadowMatsBuf) this.shadowMatsBuf.destroy();
 
     console.log('✓ Renderer destroyed');
   }
@@ -2258,11 +2388,46 @@ export class Renderer {
     shadingData[4] = methodIndex;
     shadingData[5] = this.lightIntensity;
 
-    const casterIndex = this.getShadowCasterIndex(); // -1 если ни один не помечен
-    shadingData[6] = casterIndex; // shadowCaster
-    shadingData[7] = 0;
+    const casters = this.getShadowCasters(2);
+    const caster0 = casters.length > 0 ? casters[0] : -1;
+    const caster1 = casters.length > 1 ? casters[1] : -1;
+
+    shadingData[6] = caster0; // shadowCaster0
+    shadingData[7] = caster1; // shadowCaster1
 
     device.queue.writeBuffer(this.shadingBuf, 0, shadingData.buffer);
+
+    // Матрицы для двух кастеров (SM и ShadowMatrices будут использовать одно и то же)
+    let lightViewProj0 = mat4.create();
+    let lightViewProj1 = mat4.create();
+
+    if (caster0 >= 0) {
+      lightViewProj0 = this.computeLightViewProjFor(caster0);
+      // Обновляем this.lightViewProj, чтобы остальной код (grid, PCF и т.п.) видел тот же источник
+      mat4.copy(this.lightViewProj, lightViewProj0);
+    }
+
+    if (caster1 >= 0) {
+      lightViewProj1 = this.computeLightViewProjFor(caster1);
+    }
+
+    // ShadowMatrices: до двух теневых источников
+    const shadowMats = new Float32Array(40);
+
+    if (caster0 >= 0) {
+      shadowMats[0] = 1.0; // минимум один кастер
+      shadowMats.set(lightViewProj0, 4); // mats[0]
+    } else {
+      shadowMats[0] = 0.0;
+    }
+
+    if (caster1 >= 0 && caster0 >= 0) {
+      shadowMats.set(lightViewProj1, 4 + 16); // mats[1]
+      shadowMats[0] = 2.0;
+    }
+
+    device.queue.writeBuffer(this.shadowMatsBuf, 0, shadowMats.buffer);
+
 
     const gridParams = new Float32Array(8);
     gridParams[0] = this.floorColor[0];
@@ -2273,13 +2438,14 @@ export class Renderer {
     gridParams[6] = this.wallColor[2];
     device.queue.writeBuffer(this.gridParamsBuf, 0, gridParams.buffer);
 
-    // LightsData: пока один источник — наш текущий свет
     const maxLights = 4;
-    const lightStructFloats = 16;
-    const lightsData = new Float32Array(4 + 12 + maxLights * lightStructFloats);
+    const lightStructFloats = 12; // Light = 48 байт = 12 float32
+    // LightsData: count (1 float) + скрытый паддинг + _pad0(vec3) + ещё паддинг → lights начинаются с float[8]
+    const lightsData = new Float32Array(8 + maxLights * lightStructFloats);
 
     const count = Math.min(this.lights.length || 1, maxLights);
     lightsData[0] = count;
+    // lightsData[1..7] оставляем нулями (паддинг + _pad0)
 
     for (let i = 0; i < count; i++) {
       const l = this.lights[i] ?? {
@@ -2288,27 +2454,32 @@ export class Renderer {
         yaw: this.spotYaw,
         pitch: this.spotPitch,
         intensity: this.lightIntensity,
-        color: vec3.fromValues(1, 1, 1)
+        color: vec3.fromValues(1, 1, 1),
+        castShadows: false
       };
 
-      const base = 4 + i * lightStructFloats;
+      const base = 8 + i * lightStructFloats;
+
+      // Соответствие полям struct Light:
+      // pos: vec3<f32>, lightType: f32, yaw: f32, pitch: f32, intensity: f32, color: vec3<f32>
       lightsData[base + 0] = l.pos[0];
       lightsData[base + 1] = l.pos[1];
       lightsData[base + 2] = l.pos[2];
       lightsData[base + 3] =
         l.type === 'sun' ? 0 :
-          l.type === 'spot' ? 1 : 2;
+        l.type === 'spot' ? 1 : 2;
       lightsData[base + 4] = l.yaw;
       lightsData[base + 5] = l.pitch;
       lightsData[base + 6] = l.intensity;
-      // base+7 остаётся нулём
+      // base+7 — паддинг внутри Light, оставляем нулём
       lightsData[base + 8] = l.color[0];
       lightsData[base + 9] = l.color[1];
       lightsData[base + 10] = l.color[2];
-      // остальной паддинг — нули
+      // base+11 — паддинг, ноль
     }
 
     device.queue.writeBuffer(this.lightsBuf, 0, lightsData.buffer);
+
     const activeObj = this.objects[this.activeObjectIndex];
     if (activeObj) {
       vec3.copy(this.objectPos, activeObj.pos);
@@ -2459,33 +2630,111 @@ export class Renderer {
       blurH.dispatchWorkgroups(workgroupsX, workgroupsY);
       blurH.end();
     } else {
-      const shadowPass = encoder.beginRenderPass({
-        colorAttachments: [],
-        depthStencilAttachment: {
-          view: this.shadowView,
-          depthClearValue: 1.0,
-          depthLoadOp: 'clear',
-          depthStoreOp: 'store'
+      // Не VSM: SM / PCF / PCSS
+      if (this.shadowParams.method === 'SM') {
+        // PASS 0: caster0 -> shadowView
+        if (caster0 >= 0) {
+          const shadowPass0 = encoder.beginRenderPass({
+            colorAttachments: [],
+            depthStencilAttachment: {
+              view: this.shadowView,
+              depthClearValue: 1.0,
+              depthLoadOp: 'clear',
+              depthStoreOp: 'store'
+            }
+          });
+          shadowPass0.setPipeline(this.shadowPipeline);
+          shadowPass0.setBindGroup(0, this.bindGroup0Shadow);
+
+          for (const obj of this.objects) {
+            if (!obj.castShadows) continue;
+
+            const mesh = this.meshes.find(m => m.id === obj.meshId) ?? this.meshes[0];
+            shadowPass0.setVertexBuffer(0, mesh.vbo);
+            shadowPass0.setIndexBuffer(mesh.ibo, 'uint16');
+
+            const modelMat = mat4.create();
+            mat4.fromTranslation(modelMat, obj.pos);
+            mat4.multiply(modelMat, modelMat, rotation);
+
+            const ub = new Float32Array(16 * 3 + 4 * 3);
+            ub.set(modelMat, 0);
+            ub.set(this.viewProj, 16);
+            ub.set(lightViewProj0, 32);
+            device.queue.writeBuffer(this.uniformBuf, 0, ub.buffer);
+
+            shadowPass0.drawIndexed(mesh.indexCount);
+          }
+
+          shadowPass0.end();
         }
-      });
-      shadowPass.setPipeline(this.shadowPipeline);
-      shadowPass.setBindGroup(0, this.bindGroup0Shadow);
 
-      for (const obj of this.objects) {
-        if (!obj.castShadows) continue;
+        // PASS 1: caster1 -> shadowView1
+        if (caster1 >= 0) {
+          const shadowPass1 = encoder.beginRenderPass({
+            colorAttachments: [],
+            depthStencilAttachment: {
+              view: this.shadowView1,
+              depthClearValue: 1.0,
+              depthLoadOp: 'clear',
+              depthStoreOp: 'store'
+            }
+          });
+          shadowPass1.setPipeline(this.shadowPipeline);
+          shadowPass1.setBindGroup(0, this.bindGroup0Shadow);
 
-        const mesh = this.meshes.find(m => m.id === obj.meshId) ?? this.meshes[0];
-        shadowPass.setVertexBuffer(0, mesh.vbo);
-        shadowPass.setIndexBuffer(mesh.ibo, 'uint16');
+          for (const obj of this.objects) {
+            if (!obj.castShadows) continue;
 
-        const modelMat = mat4.create();
-        mat4.fromTranslation(modelMat, obj.pos);
-        mat4.multiply(modelMat, modelMat, rotation);
-        device.queue.writeBuffer(this.uniformBuf, 0, modelMat as any);
+            const mesh = this.meshes.find(m => m.id === obj.meshId) ?? this.meshes[0];
+            shadowPass1.setVertexBuffer(0, mesh.vbo);
+            shadowPass1.setIndexBuffer(mesh.ibo, 'uint16');
 
-        shadowPass.drawIndexed(mesh.indexCount);
+            const modelMat = mat4.create();
+            mat4.fromTranslation(modelMat, obj.pos);
+            mat4.multiply(modelMat, modelMat, rotation);
+
+            const ub = new Float32Array(16 * 3 + 4 * 3);
+            ub.set(modelMat, 0);
+            ub.set(this.viewProj, 16);
+            ub.set(lightViewProj1, 32);
+            device.queue.writeBuffer(this.uniformBuf, 0, ub.buffer);
+
+            shadowPass1.drawIndexed(mesh.indexCount);
+          }
+
+          shadowPass1.end();
+        }
+      } else {
+        // PCF / PCSS: один shadow-pass в shadowView (как и раньше)
+        const shadowPass = encoder.beginRenderPass({
+          colorAttachments: [],
+          depthStencilAttachment: {
+            view: this.shadowView,
+            depthClearValue: 1.0,
+            depthLoadOp: 'clear',
+            depthStoreOp: 'store'
+          }
+        });
+        shadowPass.setPipeline(this.shadowPipeline);
+        shadowPass.setBindGroup(0, this.bindGroup0Shadow);
+
+        for (const obj of this.objects) {
+          if (!obj.castShadows) continue;
+
+          const mesh = this.meshes.find(m => m.id === obj.meshId) ?? this.meshes[0];
+          shadowPass.setVertexBuffer(0, mesh.vbo);
+          shadowPass.setIndexBuffer(mesh.ibo, 'uint16');
+
+          const modelMat = mat4.create();
+          mat4.fromTranslation(modelMat, obj.pos);
+          mat4.multiply(modelMat, modelMat, rotation);
+          device.queue.writeBuffer(this.uniformBuf, 0, modelMat as any);
+
+          shadowPass.drawIndexed(mesh.indexCount);
+        }
+        shadowPass.end();
       }
-      shadowPass.end();
     }
 
     // Main pass

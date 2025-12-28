@@ -36,6 +36,9 @@ export default function App() {
   const [objectSpecular, setObjectSpecular] = useState(0.5);
   const [objectShininess, setObjectShininess] = useState(32);
 
+  const [lightsScreen, setLightsScreen] = useState<
+    { x: number; y: number; visible: boolean; mode: LightMode; active: boolean }[]
+  >([]);
 
   const [lightScreenPos, setLightScreenPos] = useState<{ x: number; y: number; visible: boolean }>({
     x: 0,
@@ -86,8 +89,8 @@ export default function App() {
     const loop = () => {
       const r = rendererRef.current;
       if (r) {
-        const pos = r.getLightScreenPosition();
-        setLightScreenPos(pos);
+        const list = r.getAllLightsScreenPositions();
+        setLightsScreen(list);
 
         const meta = r.getLightsMeta();
         setLightMeta(meta);
@@ -318,26 +321,30 @@ export default function App() {
           style={{ width: '100%', height: '100%', display: 'block' }}
         />
 
-        {/* Иконка источника света поверх canvas */}
-        {lightScreenPos.visible && (
-          <img
-            src={
-              lightMode === 'sun'
-                ? sunIcon
-                : lightMode === 'spot'
-                  ? spotIcon
-                  : topIcon
-            }
-            alt={lightMode}
-            style={{
-              position: 'absolute',
-              left: lightScreenPos.x - 16,
-              top: lightScreenPos.y - 16,
-              width: 32,
-              height: 32,
-              pointerEvents: 'none',
-            }}
-          />
+        {/* Иконки всех источников света поверх canvas */}
+        {lightsScreen.map((l, idx) =>
+          l.visible ? (
+            <img
+              key={idx}
+              src={
+                l.mode === 'sun'
+                  ? sunIcon
+                  : l.mode === 'spot'
+                    ? spotIcon
+                    : topIcon
+              }
+              alt={l.mode}
+              style={{
+                position: 'absolute',
+                left: l.x - 16,
+                top: l.y - 16,
+                width: l.active ? 32 : 24,
+                height: l.active ? 32 : 24,
+                opacity: l.active ? 1.0 : 0.7,
+                pointerEvents: 'none',
+              }}
+            />
+          ) : null
         )}
 
         {error && (

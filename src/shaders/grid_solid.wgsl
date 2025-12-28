@@ -21,19 +21,6 @@ struct Uniforms {
   shadowParams: vec4<f32>,
 };
 
-@group(0) @binding(0) var<uniform> u: Uniforms;
-
-const PI: f32 = 3.14159265;
-const LIGHT_MODE_SUN: i32 = 0;
-const LIGHT_MODE_SPOT: i32 = 1;
-const LIGHT_MODE_TOP: i32 = 2;
-
-@group(1) @binding(0) var shadowMap: texture_depth_2d;
-@group(1) @binding(1) var shadowSampler: sampler_comparison;
-
-@group(2) @binding(0) var floorTex: texture_2d<f32>;
-@group(2) @binding(1) var floorSampler: sampler;
-
 struct ShadingParams {
   shadowStrength: f32,
   lightMode: f32,
@@ -41,8 +28,8 @@ struct ShadingParams {
   spotPitch: f32,
   methodIndex: f32,
   lightIntensity: f32,
-  shadowCaster: f32,
-  _pad2: f32,
+  shadowCaster0: f32,
+  shadowCaster1: f32,
 };
 
 struct GridParams {
@@ -52,7 +39,26 @@ struct GridParams {
   _pad1: f32,
 };
 
+struct ShadowMatrices {
+  count: f32,
+  _pad0: vec3<f32>,
+  mats: array<mat4x4<f32>, 2>,
+};
+
+@group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var<uniform> gridParams: GridParams;
+@group(0) @binding(2) var<uniform> shadowMats: ShadowMatrices;
+
+@group(1) @binding(0) var shadowMap: texture_depth_2d;
+@group(1) @binding(1) var shadowSampler: sampler_comparison;
+
+@group(2) @binding(0) var floorTex: texture_2d<f32>;
+@group(2) @binding(1) var floorSampler: sampler;
+
+const PI: f32 = 3.14159265;
+const LIGHT_MODE_SUN: i32 = 0;
+const LIGHT_MODE_SPOT: i32 = 1;
+const LIGHT_MODE_TOP: i32 = 2;
 
 const POISSON_16: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
   vec2<f32>(-0.613, 0.354), vec2<f32>(0.743, -0.125),
@@ -211,9 +217,12 @@ fn computeLightContributionFloor(
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
+  let _shadowCount = shadowMats.count;
+
   // Процедурная сетка (линии)
   let gridSize = 1.0;
   let coord = input.worldPos.xz / gridSize;
+
   let grid = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
   let line = min(grid.x, grid.y);
   let gridAlpha = 1.0 - min(line, 1.0);
@@ -237,7 +246,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
 
   let lightCount = i32(round(lightsData.count));
   var diffuseSum: vec3<f32> = vec3<f32>(0.0);
-  let caster = i32(round(shading.shadowCaster));
+  let caster = i32(round(shading.shadowCaster0));
 
   for (var i = 0; i < lightCount; i = i + 1) {
     let light = lightsData.lights[i];

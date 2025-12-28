@@ -26,6 +26,12 @@ struct ObjectParams {
   spec: vec4<f32>, // x: specStrength, y: shininess, z,w: резерв
 };
 
+struct ShadowMatrices {
+  count: f32,
+  _pad0: vec3<f32>,
+  mats: array<mat4x4<f32>, 2>,
+};
+
 const PI: f32 = 3.14159265;
 const LIGHT_MODE_SUN: i32 = 0;
 const LIGHT_MODE_SPOT: i32 = 1;
@@ -33,9 +39,12 @@ const LIGHT_MODE_TOP: i32 = 2;
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var<uniform> objParams: ObjectParams;
+@group(0) @binding(2) var<uniform> shadowMats: ShadowMatrices;
 
-@group(1) @binding(0) var shadowMap: texture_depth_2d;
-@group(1) @binding(1) var shadowSampler: sampler_comparison;
+@group(1) @binding(0) var shadowMap0: texture_depth_2d;
+@group(1) @binding(1) var shadowSampler0: sampler_comparison;
+@group(1) @binding(2) var shadowMap1: texture_depth_2d;
+@group(1) @binding(3) var shadowSampler1: sampler_comparison;
 
 @group(2) @binding(0) var objTex: texture_2d<f32>;
 @group(2) @binding(1) var objSampler: sampler;
@@ -47,8 +56,8 @@ struct ShadingParams {
   spotPitch: f32,
   methodIndex: f32,
   lightIntensity: f32,
-  shadowCaster: f32,
-  _pad2: f32,
+  shadowCaster0: f32,
+  shadowCaster1: f32,
 };
 
 struct Light {
@@ -82,17 +91,22 @@ fn vs_main(input: VSIn) -> VSOut {
   return out;
 }
 
-fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
+fn shadowVisibilityIndexed(lightSpacePos: vec4<f32>, lightIndex: i32) -> f32 {
   let ndc = lightSpacePos.xyz / lightSpacePos.w;
   let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5));
   let depth = ndc.z - u.shadowParams.x;
-  
-  let inBounds = ndc.x >= -1.0 && ndc.x <= 1.0 && 
-                 ndc.y >= -1.0 && ndc.y <= 1.0 && 
+
+  let inBounds = ndc.x >= -1.0 && ndc.x <= 1.0 &&
+                 ndc.y >= -1.0 && ndc.y <= 1.0 &&
                  ndc.z >= 0.0 && ndc.z <= 1.0;
-  
-  let shadow = textureSampleCompare(shadowMap, shadowSampler, uv, depth);
-  return select(shadow, 1.0, !inBounds);
+
+  if (lightIndex == 0) {
+    let shadow = textureSampleCompare(shadowMap0, shadowSampler0, uv, depth);
+    return select(shadow, 1.0, !inBounds);
+  } else {
+    let shadow = textureSampleCompare(shadowMap1, shadowSampler1, uv, depth);
+    return select(shadow, 1.0, !inBounds);
+  }
 }
 
 fn computeLightContribution(
@@ -100,7 +114,7 @@ fn computeLightContribution(
   worldPos: vec3<f32>,
   light: Light,
   isShadowed: bool,
-  lightSpacePos: vec4<f32>
+  lightIndex: i32
 ) -> f32 {
   let PI: f32 = 3.14159265;
   let LIGHT_MODE_SUN: i32 = 0;
@@ -143,8 +157,12 @@ fn computeLightContribution(
   }
 
   var vis: f32 = 1.0;
-  if (isShadowed) {
-    let rawVisibility = shadowVisibility(lightSpacePos);
+  if (isShadowed && lightIndex >= 0) {
+    // Вычисляем координаты в пространстве света по матрице из shadowMats
+    let lsMat = shadowMats.mats[lightIndex];
+    let lightSpacePos = lsMat * vec4<f32>(worldPos, 1.0);
+
+    let rawVisibility = shadowVisibilityIndexed(lightSpacePos, lightIndex);
 
     let strength = clamp(shading.shadowStrength, 0.0, 2.0);
     let t = clamp(strength, 0.0, 1.0);
@@ -173,6 +191,9 @@ fn computeLightContribution(
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
+  // Делаем shadowMats используемым, чтобы биндинг не выбрасывался
+  let _shadowCount = shadowMats.count;
+
   let N = normalize(input.worldN);
   let worldPos = input.worldPos;
 
@@ -185,19 +206,32 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
 
   let lightCount = i32(round(lightsData.count));
   var diffuseSum: vec3<f32> = vec3<f32>(0.0);
-  let caster = i32(round(shading.shadowCaster));
+  let caster0 = i32(round(shading.shadowCaster0));
+  let caster1 = i32(round(shading.shadowCaster1));
   let receive = objParams.base.w;
 
   for (var i = 0; i < lightCount; i = i + 1) {
     let light = lightsData.lights[i];
-    let isShadowed = (i == caster) && (receive > 0.5);
+
+    var isShadowed = false;
+    var lightIndex = -1;
+
+    if (receive > 0.5) {
+      if (i == caster0) {
+        isShadowed = true;
+        lightIndex = 0;
+      } else if (i == caster1) {
+        isShadowed = true;
+        lightIndex = 1;
+      }
+    }
 
     let contrib = computeLightContribution(
       N,
       worldPos,
       light,
       isShadowed,
-      input.lightSpacePos
+      lightIndex
     );
     diffuseSum = diffuseSum + contrib * light.color;
   }

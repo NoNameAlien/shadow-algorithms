@@ -26,8 +26,15 @@ struct ObjectParams {
   spec: vec4<f32>, // x: specStrength, y: shininess
 };
 
+struct ShadowMatrices {
+  count: f32,
+  _pad0: vec3<f32>,
+  mats: array<mat4x4<f32>, 2>,
+};
+
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var<uniform> objParams: ObjectParams;
+@group(0) @binding(2) var<uniform> shadowMats: ShadowMatrices;
 
 const PI: f32 = 3.14159265;
 const LIGHT_MODE_SUN: i32 = 0;
@@ -47,8 +54,8 @@ struct ShadingParams {
   spotPitch: f32,
   methodIndex: f32,
   lightIntensity: f32,
-  shadowCaster: f32,
-  _pad2: f32,
+  shadowCaster0: f32,
+  shadowCaster1: f32,
 };
 
 struct Light {
@@ -223,19 +230,20 @@ fn computeLightContribution(
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
+  let _shadowCount = shadowMats.count;
+
   let N = normalize(input.worldN);
   let worldPos = input.worldPos;
 
   // Цвет объекта из текстуры
   var baseColor = objParams.base.xyz;
   let texColor = textureSample(objTex, objSampler, input.uv).xyz;
-  baseColor = baseColor * texColor;
 
   let ambient = 0.55;
 
   let lightCount = i32(round(lightsData.count));
   var diffuseSum: vec3<f32> = vec3<f32>(0.0);
-  let caster = i32(round(shading.shadowCaster));
+  let caster = i32(round(shading.shadowCaster0));
   let receive = objParams.base.w;
 
   for (var i = 0; i < lightCount; i = i + 1) {
