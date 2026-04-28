@@ -12,14 +12,30 @@ import {
 } from './geometryData';
 import { orthoZO } from './math';
 import { createRendererPipelines } from './pipelines';
-import { createSolidTexture, createTextureFromImageFile } from './textureUtils';
+import {
+  createBufferFromData,
+  createDefaultTextureResources,
+  createDepthResource,
+  createShadowResources as createShadowResourceSet,
+  createUniformBuffers,
+  createVSMResources as createVSMResourceSet
+} from './resources';
+import {
+  createDefaultLights,
+  createDefaultObjects,
+  createLight,
+  createSceneDTO,
+  createSceneObject,
+  lightsFromDTO,
+  objectsFromDTO
+} from './scene';
+import { projectToScreen, raySphereHit } from './interaction';
+import { createTextureFromImageFile } from './textureUtils';
 import type {
   GPUCtx,
-  LightDTO,
   LightDef,
   LightMode,
   MeshDef,
-  ObjectDTO,
   SceneDTO,
   SceneObject,
   Selection,
@@ -217,20 +233,7 @@ export class Renderer {
       return this.lights.length - 1;
     }
 
-    const basePos = def?.pos
-      ? vec3.clone(def.pos)
-      : vec3.fromValues(this.objectPos[0] + 4, 6, this.objectPos[2] + 2);
-
-    const light: LightDef = {
-      pos: basePos,
-      type: def?.type ?? 'spot',
-      yaw: def?.yaw ?? 0.8,
-      pitch: def?.pitch ?? -0.6,
-      intensity: def?.intensity ?? 1.0,
-      color: def?.color ?? vec3.fromValues(1.0, 1.0, 1.0),
-      castShadows: def?.castShadows ?? false
-    };
-
+    const light = createLight({ def, objectPos: this.objectPos });
     this.lights.push(light);
     const idx = this.lights.length - 1;
     this.setActiveLight(idx);
@@ -270,53 +273,21 @@ export class Renderer {
   }
 
   exportScene(): SceneDTO {
-    const lights: LightDTO[] = this.lights.map((l) => ({
-      pos: [l.pos[0], l.pos[1], l.pos[2]],
-      type: l.type,
-      yaw: l.yaw,
-      pitch: l.pitch,
-      intensity: l.intensity,
-      color: [l.color[0], l.color[1], l.color[2]],
-      castShadows: l.castShadows
-    }));
-
-    const objects: ObjectDTO[] = this.objects.map((o) => ({
-      pos: [o.pos[0], o.pos[1], o.pos[2]],
-      moveSpeed: o.moveSpeed,
-      color: [o.color[0], o.color[1], o.color[2]],
-      castShadows: o.castShadows,
-      receiveShadows: o.receiveShadows,
-      meshId: o.meshId ?? this.defaultMeshId,
-      specular: o.specular,
-      shininess: o.shininess
-    }));
-
-    return {
-      lights,
-      objects,
-      floorColor: [this.floorColor[0], this.floorColor[1], this.floorColor[2]],
-      wallColor: [this.wallColor[0], this.wallColor[1], this.wallColor[2]],
+    return createSceneDTO({
+      lights: this.lights,
+      objects: this.objects,
+      defaultMeshId: this.defaultMeshId,
+      floorColor: this.floorColor,
+      wallColor: this.wallColor,
       showFloor: this.showFloor,
       showWalls: this.showWalls,
-      shadowParams: { ...this.shadowParams }
-    };
+      shadowParams: this.shadowParams
+    });
   }
 
   importScene(scene: SceneDTO) {
     // Свет
-    this.lights = scene.lights.map((ld) => ({
-      pos: vec3.fromValues(ld.pos[0], ld.pos[1], ld.pos[2]),
-      type: ld.type,
-      yaw: ld.yaw,
-      pitch: ld.pitch,
-      intensity: ld.intensity,
-      color: vec3.fromValues(
-        ld.color?.[0] ?? 1.0,
-        ld.color?.[1] ?? 1.0,
-        ld.color?.[2] ?? 1.0
-      ),
-      castShadows: ld.castShadows ?? false
-    }));
+    this.lights = lightsFromDTO(scene.lights);
 
     if (this.lights.length === 0) {
       this.initDefaultLights();
@@ -332,21 +303,7 @@ export class Renderer {
     this.updateLightViewProj();
 
     // Объекты
-    this.objects = scene.objects.map((od, idx) => ({
-      id: idx,
-      pos: vec3.fromValues(od.pos[0], od.pos[1], od.pos[2]),
-      moveSpeed: od.moveSpeed,
-      color: vec3.fromValues(
-        od.color?.[0] ?? 1.0,
-        od.color?.[1] ?? 1.0,
-        od.color?.[2] ?? 1.0
-      ),
-      castShadows: od.castShadows ?? true,
-      receiveShadows: od.receiveShadows ?? true,
-      meshId: od.meshId ?? this.defaultMeshId,
-      specular: od.specular ?? 0.5,
-      shininess: od.shininess ?? 32.0
-    }));
+    this.objects = objectsFromDTO(scene.objects, this.defaultMeshId);
 
     if (this.objects.length === 0) {
       this.initDefaultObjects();
@@ -376,21 +333,13 @@ export class Renderer {
 
   addObject(def?: Partial<SceneObject>): number {
     const id = this.objects.length ? this.objects[this.objects.length - 1].id + 1 : 0;
-    const basePos = def?.pos
-      ? vec3.clone(def.pos)
-      : vec3.fromValues(this.objectPos[0] + 2, this.objectPos[1], this.objectPos[2] + 2);
-
-    const obj: SceneObject = {
+    const obj = createSceneObject({
+      def,
       id,
-      pos: basePos,
-      moveSpeed: def?.moveSpeed ?? this.objectMoveSpeed,
-      color: def?.color ?? vec3.fromValues(1.0, 1.0, 1.0),
-      castShadows: def?.castShadows ?? true,
-      receiveShadows: def?.receiveShadows ?? true,
-      meshId: def?.meshId ?? this.defaultMeshId,
-      specular: def?.specular ?? 0.5,
-      shininess: def?.shininess ?? 32.0
-    };
+      objectPos: this.objectPos,
+      objectMoveSpeed: this.objectMoveSpeed,
+      defaultMeshId: this.defaultMeshId
+    });
 
     this.objects.push(obj);
     this.activeObjectIndex = this.objects.length - 1;
@@ -526,46 +475,18 @@ export class Renderer {
   }
 
   private initDefaultLights() {
-    this.lights = [];
-    const main: LightDef = {
-      pos: vec3.clone(this.lightDir),
-      type: this.lightMode,
-      yaw: this.spotYaw,
-      pitch: this.spotPitch,
-      intensity: this.lightIntensity,
-      color: vec3.fromValues(1.0, 1.0, 1.0),
-      castShadows: true
-    };
-    this.lights.push(main);
-
-    const second: LightDef = {
-      pos: vec3.fromValues(-6, 8, -4),
-      type: 'spot',
-      yaw: 0.8,
-      pitch: -0.6,
-      intensity: 0.7,
-      color: vec3.fromValues(1.0, 0.9, 0.7),
-      castShadows: false
-    };
-    this.lights.push(second);
-
+    this.lights = createDefaultLights({
+      lightDir: this.lightDir,
+      lightMode: this.lightMode,
+      spotYaw: this.spotYaw,
+      spotPitch: this.spotPitch,
+      lightIntensity: this.lightIntensity
+    });
     this.activeLightIndex = 0;
   }
 
   private initDefaultObjects() {
-    this.objects = [
-      {
-        id: 0,
-        pos: vec3.fromValues(0, 0, 0),
-        moveSpeed: 1.0,
-        color: vec3.fromValues(1.0, 1.0, 1.0),
-        castShadows: true,
-        receiveShadows: true,
-        meshId: this.defaultMeshId,
-        specular: 0.5,
-        shininess: 32.0
-      }
-    ];
+    this.objects = createDefaultObjects(this.defaultMeshId);
     this.activeObjectIndex = 0;
     vec3.copy(this.objectPos, this.objects[0].pos);
   }
@@ -803,7 +724,7 @@ export class Renderer {
 
     for (let i = 0; i < this.objects.length; i++) {
       const center = this.objects[i].pos;
-      const t = this.raySphereHit(rayOrigin, rayDir, center, objectRadius);
+      const t = raySphereHit(rayOrigin, rayDir, center, objectRadius);
       if (t < bestObjT) {
         bestObjT = t;
         bestObjIndex = i;
@@ -817,7 +738,7 @@ export class Renderer {
 
     for (let i = 0; i < this.lights.length; i++) {
       const center = this.lights[i].pos;
-      const t = this.raySphereHit(rayOrigin, rayDir, center, lightRadius);
+      const t = raySphereHit(rayOrigin, rayDir, center, lightRadius);
       if (t < bestLightT) {
         bestLightT = t;
         bestLightIndex = i;
@@ -883,22 +804,6 @@ export class Renderer {
       vec3.fromValues(0, 0, 1), // Z
     ];
 
-    const projectToScreen = (p: vec3): { x: number; y: number; ok: boolean } => {
-      const v4 = vec4.fromValues(p[0], p[1], p[2], 1.0);
-      const out = vec4.create();
-      vec4.transformMat4(out, v4, this.viewProj);
-      const w = out[3];
-      if (w === 0) return { x: 0, y: 0, ok: false };
-
-      const ndcX = out[0] / w;
-      const ndcY = out[1] / w;
-
-      const sx = (ndcX * 0.5 + 0.5) * rect.width;
-      const sy = (1 - (ndcY * 0.5 + 0.5)) * rect.height;
-
-      return { x: sx, y: sy, ok: true };
-    };
-
     let bestAxis = -1;
     let bestDist = Number.POSITIVE_INFINITY;
 
@@ -907,8 +812,8 @@ export class Renderer {
 
       const endWorld = vec3.scaleAndAdd(vec3.create(), originWorld, dirWorld, axisLength);
 
-      const p0 = projectToScreen(originWorld);
-      const p1 = projectToScreen(endWorld);
+      const p0 = projectToScreen(originWorld, this.viewProj, rect);
+      const p1 = projectToScreen(endWorld, this.viewProj, rect);
       if (!p0.ok || !p1.ok) continue;
 
       const vx = p1.x - p0.x;
@@ -947,27 +852,6 @@ export class Renderer {
     return bestAxis;
   }
 
-  // Возвращает расстояние t до ближайшего пересечения луча со сферой
-  // или Infinity, если пересечений нет.
-  private raySphereHit(origin: vec3, dir: vec3, center: vec3, radius: number): number {
-    const oc = vec3.subtract(vec3.create(), origin, center);
-    const a = vec3.dot(dir, dir); // для нормализованного dir = 1
-    const b = 2 * vec3.dot(oc, dir);
-    const c = vec3.dot(oc, oc) - radius * radius;
-    const discriminant = b * b - 4 * a * c;
-    if (discriminant < 0) return Number.POSITIVE_INFINITY;
-
-    const sqrtD = Math.sqrt(discriminant);
-    const t0 = (-b - sqrtD) / (2 * a);
-    const t1 = (-b + sqrtD) / (2 * a);
-
-    let t = Number.POSITIVE_INFINITY;
-    if (t0 >= 0 && t0 < t) t = t0;
-    if (t1 >= 0 && t1 < t) t = t1;
-
-    return t;
-  }
-
   private setSelection(sel: Selection) {
     if (this.selection === sel) return;
     this.selection = sel;
@@ -987,47 +871,24 @@ export class Renderer {
 
   private createDepth() {
     const { device } = this.gpu;
-    if (this.depthTex) this.depthTex.destroy();
-    this.depthTex = device.createTexture({
-      size: { width: this.canvas.width, height: this.canvas.height },
-      format: 'depth24plus',
-      usage: GPUTextureUsage.RENDER_ATTACHMENT
-    });
-    this.depthView = this.depthTex.createView();
+    const depth = createDepthResource(device, this.canvas.width, this.canvas.height, this.depthTex);
+    this.depthTex = depth.texture;
+    this.depthView = depth.view;
   }
 
   private createShadowResources() {
     const { device } = this.gpu;
-
-    if (this.shadowTex) this.shadowTex.destroy();
-    if (this.shadowTex1) this.shadowTex1.destroy();
-
-    this.shadowTex = device.createTexture({
-      size: [this.shadowSize, this.shadowSize],
-      format: 'depth32float',
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
-    });
-    this.shadowView = this.shadowTex.createView();
-
-    // Вторая карта для второго теневого источника (SM)
-    this.shadowTex1 = device.createTexture({
-      size: [this.shadowSize, this.shadowSize],
-      format: 'depth32float',
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
-    });
-    this.shadowView1 = this.shadowTex1.createView();
-
-    this.shadowSampler = device.createSampler({
-      compare: 'less',
-      magFilter: 'linear',
-      minFilter: 'linear'
+    const resources = createShadowResourceSet(device, this.shadowSize, {
+      shadowTex: this.shadowTex,
+      shadowTex1: this.shadowTex1
     });
 
-    // Линейный сэмплер для чтения depth (PCSS)
-    this.shadowSamplerLinear = device.createSampler({
-      magFilter: 'linear',
-      minFilter: 'linear'
-    });
+    this.shadowTex = resources.shadowTex;
+    this.shadowView = resources.shadowView;
+    this.shadowTex1 = resources.shadowTex1;
+    this.shadowView1 = resources.shadowView1;
+    this.shadowSampler = resources.shadowSampler;
+    this.shadowSamplerLinear = resources.shadowSamplerLinear;
 
     console.log('✓ Shadow resources created');
   }
@@ -1050,57 +911,27 @@ export class Renderer {
 
   private createVSMResources() {
     const { device } = this.gpu;
-
-    // Текстура моментов (RGBA16F вместо RG32F — filterable!)
-    if (this.vsmMomentsTex) this.vsmMomentsTex.destroy();
-    this.vsmMomentsTex = device.createTexture({
-      size: [this.shadowSize, this.shadowSize],
-      format: 'rgba16float',
-      usage: GPUTextureUsage.RENDER_ATTACHMENT |
-        GPUTextureUsage.TEXTURE_BINDING |
-        GPUTextureUsage.STORAGE_BINDING
+    const resources = createVSMResourceSet(device, this.shadowSize, {
+      vsmMomentsTex: this.vsmMomentsTex,
+      vsmBlurTex: this.vsmBlurTex
     });
-    this.vsmMomentsView = this.vsmMomentsTex.createView();
 
-    // Временная текстура для blur (ping-pong)
-    if (this.vsmBlurTex) this.vsmBlurTex.destroy();
-    this.vsmBlurTex = device.createTexture({
-      size: [this.shadowSize, this.shadowSize],
-      format: 'rgba16float',
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING
-    });
-    this.vsmBlurView = this.vsmBlurTex.createView();
-
-    this.vsmSampler = device.createSampler({
-      magFilter: 'linear',
-      minFilter: 'linear',
-      addressModeU: 'clamp-to-edge',
-      addressModeV: 'clamp-to-edge'
-    });
+    this.vsmMomentsTex = resources.vsmMomentsTex;
+    this.vsmMomentsView = resources.vsmMomentsView;
+    this.vsmBlurTex = resources.vsmBlurTex;
+    this.vsmBlurView = resources.vsmBlurView;
+    this.vsmSampler = resources.vsmSampler;
 
     console.log('✓ VSM resources created');
-  }
-
-  private createBufferFromData(
-    data: Float32Array<ArrayBuffer> | Uint16Array<ArrayBuffer>,
-    usage: GPUBufferUsageFlags
-  ): GPUBuffer {
-    const { device } = this.gpu;
-    const buffer = device.createBuffer({
-      size: data.byteLength,
-      usage: usage | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(buffer, 0, data);
-    return buffer;
   }
 
   private createGeometry() {
     const cube = createCubeGeometry();
     this.indexCount = cube.indices.length;
-    this.vbo = this.createBufferFromData(cube.positions, GPUBufferUsage.VERTEX);
-    this.nbo = this.createBufferFromData(cube.normals, GPUBufferUsage.VERTEX);
-    this.tbo = this.createBufferFromData(cube.uvs, GPUBufferUsage.VERTEX);
-    this.ibo = this.createBufferFromData(cube.indices, GPUBufferUsage.INDEX);
+    this.vbo = createBufferFromData(this.gpu.device, cube.positions, GPUBufferUsage.VERTEX);
+    this.nbo = createBufferFromData(this.gpu.device, cube.normals, GPUBufferUsage.VERTEX);
+    this.tbo = createBufferFromData(this.gpu.device, cube.uvs, GPUBufferUsage.VERTEX);
+    this.ibo = createBufferFromData(this.gpu.device, cube.indices, GPUBufferUsage.INDEX);
 
     this.meshes = [];
     const mesh: MeshDef = {
@@ -1118,78 +949,45 @@ export class Renderer {
 
   private createGrid() {
     const grid = createGridGeometry();
-    this.gridVBO = this.createBufferFromData(grid.positions, GPUBufferUsage.VERTEX);
-    this.gridNBO = this.createBufferFromData(grid.normals, GPUBufferUsage.VERTEX);
-    this.gridTBO = this.createBufferFromData(grid.uvs, GPUBufferUsage.VERTEX);
+    this.gridVBO = createBufferFromData(this.gpu.device, grid.positions, GPUBufferUsage.VERTEX);
+    this.gridNBO = createBufferFromData(this.gpu.device, grid.normals, GPUBufferUsage.VERTEX);
+    this.gridTBO = createBufferFromData(this.gpu.device, grid.uvs, GPUBufferUsage.VERTEX);
   }
 
   private createWalls() {
     const walls = createWallsGeometry();
-    this.wallVBO = this.createBufferFromData(walls.positions, GPUBufferUsage.VERTEX);
-    this.wallNBO = this.createBufferFromData(walls.normals, GPUBufferUsage.VERTEX);
-    this.wallTBO = this.createBufferFromData(walls.uvs, GPUBufferUsage.VERTEX);
+    this.wallVBO = createBufferFromData(this.gpu.device, walls.positions, GPUBufferUsage.VERTEX);
+    this.wallNBO = createBufferFromData(this.gpu.device, walls.normals, GPUBufferUsage.VERTEX);
+    this.wallTBO = createBufferFromData(this.gpu.device, walls.uvs, GPUBufferUsage.VERTEX);
   }
 
   private createLightSphere() {
     const { beam } = createLightMeshesGeometry();
 
-    this.lightBeamVBO = this.createBufferFromData(beam.vertices, GPUBufferUsage.VERTEX);
-    this.lightBeamIBO = this.createBufferFromData(beam.indices, GPUBufferUsage.INDEX);
+    this.lightBeamVBO = createBufferFromData(this.gpu.device, beam.vertices, GPUBufferUsage.VERTEX);
+    this.lightBeamIBO = createBufferFromData(this.gpu.device, beam.indices, GPUBufferUsage.INDEX);
     this.lightBeamIndexCount = 2;
   }
 
   private createAxisGizmo() {
     const axis = createAxisGizmoGeometry();
     this.axisIndexCount = axis.indices.length;
-    this.axisVBO = this.createBufferFromData(axis.vertices, GPUBufferUsage.VERTEX);
-    this.axisIBO = this.createBufferFromData(axis.indices, GPUBufferUsage.INDEX);
+    this.axisVBO = createBufferFromData(this.gpu.device, axis.vertices, GPUBufferUsage.VERTEX);
+    this.axisIBO = createBufferFromData(this.gpu.device, axis.indices, GPUBufferUsage.INDEX);
 
     console.log('✓ Axis gizmo geometry created');
   }
 
   private createUniforms() {
-    const { device } = this.gpu;
-    const uniformSize = 16 * 4 * 3 + 4 * 4 * 3;
+    const buffers = createUniformBuffers(this.gpu.device);
 
-    this.uniformBuf = device.createBuffer({
-      size: uniformSize,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-
-    this.axisUniformBuf = device.createBuffer({
-      size: uniformSize,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-
-    this.shadingBuf = device.createBuffer({
-      size: 32, // два vec4<f32> = 8 float32
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-
-    this.gridParamsBuf = device.createBuffer({
-      size: 32,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-
-    this.objectParamsBuf = device.createBuffer({
-      size: 32, // два vec4<f32> = 8 float32
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-
-    this.shadowMatsBuf = device.createBuffer({
-      // ShadowMatrices = (count + pad3 + 2*16) float32 = 36 * 4 = 144,
-      // но layout требует minBindingSize = 160 → берём с запасом
-      size: 160,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-
-    this.lightsBuf = device.createBuffer({
-      // count(4) + pad(12) + 4 * sizeof(Light)
-      // Light = vec3 + f + f + f + f + vec3 = 16 * 4 bytes = 64
-      // Итого 16*4 + 4*64 = 64 + 256 = 320 → округлим до 352 для выравнивания
-      size: 352,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
+    this.uniformBuf = buffers.uniformBuf;
+    this.axisUniformBuf = buffers.axisUniformBuf;
+    this.shadingBuf = buffers.shadingBuf;
+    this.gridParamsBuf = buffers.gridParamsBuf;
+    this.objectParamsBuf = buffers.objectParamsBuf;
+    this.shadowMatsBuf = buffers.shadowMatsBuf;
+    this.lightsBuf = buffers.lightsBuf;
   }
 
   private recreateBindGroups() {
@@ -1333,28 +1131,14 @@ export class Renderer {
   }
 
   private createDefaultTextures() {
-    const { device } = this.gpu;
-    const objectTexture = createSolidTexture(device, 200, 200, 200);
-    const floorTexture = createSolidTexture(device, 120, 120, 120);
+    const resources = createDefaultTextureResources(this.gpu.device);
 
-    this.objTexture = objectTexture.texture;
-    this.objTextureView = objectTexture.view;
-    this.floorTexture = floorTexture.texture;
-    this.floorTextureView = floorTexture.view;
-
-    this.objSampler = device.createSampler({
-      magFilter: 'linear',
-      minFilter: 'linear',
-      addressModeU: 'repeat',
-      addressModeV: 'repeat'
-    });
-
-    this.floorSampler = device.createSampler({
-      magFilter: 'linear',
-      minFilter: 'linear',
-      addressModeU: 'repeat',
-      addressModeV: 'repeat'
-    });
+    this.objTexture = resources.objTexture;
+    this.objTextureView = resources.objTextureView;
+    this.objSampler = resources.objSampler;
+    this.floorTexture = resources.floorTexture;
+    this.floorTextureView = resources.floorTextureView;
+    this.floorSampler = resources.floorSampler;
   }
 
   private updateViewProj() {

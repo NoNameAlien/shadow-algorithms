@@ -7,12 +7,9 @@
 
 fn shadowVisibilityIndexed(lightSpacePos: vec4<f32>, lightIndex: i32) -> f32 {
   let ndc = lightSpacePos.xyz / lightSpacePos.w;
-  let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5));
+  let uv = ndcToUv(ndc);
   let depth = ndc.z - u.shadowParams.x;
-
-  let inBounds = ndc.x >= -1.0 && ndc.x <= 1.0 &&
-                 ndc.y >= -1.0 && ndc.y <= 1.0 &&
-                 ndc.z >= 0.0 && ndc.z <= 1.0;
+  let inBounds = isInBounds(ndc);
 
   if (lightIndex == 0) {
     let shadow = textureSampleCompare(shadowMap0, shadowSampler0, uv, depth);
@@ -30,62 +27,19 @@ fn computeLightContribution(
   isShadowed: bool,
   lightIndex: i32
 ) -> f32 {
-  let lightPos = light.pos;
-  let mode = i32(round(light.lightType));
-
-  var L: vec3<f32>;
-  var lambert: f32;
-
-  if (mode == LIGHT_MODE_TOP) {
-    L = normalize(vec3<f32>(0.0, 1.0, 0.0));
-    lambert = max(dot(N, L), 0.0);
-  } else if (mode == LIGHT_MODE_SPOT) {
-    let yaw = light.yaw;
-    let pitch = light.pitch;
-    let axis = vec3<f32>(
-      cos(pitch) * sin(yaw),
-      sin(pitch),
-      cos(pitch) * cos(yaw)
-    );
-
-    let toFrag = normalize(worldPos - lightPos);
-    L = normalize(lightPos - worldPos);
-    lambert = max(dot(N, L), 0.0);
-
-    let cosAngle = dot(toFrag, axis);
-    let innerDeg: f32 = 15.0;
-    let outerDeg: f32 = 25.0;
-    let inner = cos(innerDeg * PI / 180.0);
-    let outer = cos(outerDeg * PI / 180.0);
-    let tSpot = clamp((cosAngle - outer) / (inner - outer), 0.0, 1.0);
-    lambert = lambert * tSpot;
-  } else {
-    L = normalize(lightPos);
-    lambert = max(dot(N, L), 0.0);
-  }
+  let L = computeLightDirection(light, worldPos);
+  let lambert = max(dot(N, L), 0.0) * computeSpotFactor(light, worldPos);
 
   var vis: f32 = 1.0;
   if (isShadowed && lightIndex >= 0) {
     let lsMat = shadowMats.mats[lightIndex];
     let lightSpacePos = lsMat * vec4<f32>(worldPos, 1.0);
     let rawVisibility = shadowVisibilityIndexed(lightSpacePos, lightIndex);
-
-    let strength = clamp(shading.shadowStrength, 0.0, 2.0);
-    let t = clamp(strength, 0.0, 1.0);
-    vis = mix(1.0, rawVisibility, t);
-
-    if (strength > 1.0) {
-      let extra = strength - 1.0;
-      vis = max(0.0, vis * (1.0 - extra));
-    }
+    vis = mixShadowStrength(rawVisibility, shading.shadowStrength);
   }
 
   let viewDir = normalize(u.cameraPos.xyz - worldPos);
-  let halfVec = normalize(L + viewDir);
-  let specAngle = max(dot(N, halfVec), 0.0);
-  let shininess = max(objParams.spec.y, 1.0);
-  let specular = pow(specAngle, shininess);
-
+  let specular = blinnPhongSpecular(N, L, viewDir, objParams.spec.y);
   let intensity = max(light.intensity, 0.0);
   let diffuseTerm = lambert * vis * intensity;
   let specFactor = max(objParams.spec.x, 0.0);

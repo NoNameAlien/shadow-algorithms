@@ -1,3 +1,5 @@
+// @include lighting_common
+
 struct VSIn {
   @location(0) position: vec3<f32>,
   @location(1) normal: vec3<f32>,
@@ -36,39 +38,8 @@ struct ShadowMatrices {
 @group(0) @binding(1) var<uniform> objParams: ObjectParams;
 @group(0) @binding(2) var<uniform> shadowMats: ShadowMatrices;
 
-const PI: f32 = 3.14159265;
-const LIGHT_MODE_SUN: i32 = 0;
-const LIGHT_MODE_SPOT: i32 = 1;
-const LIGHT_MODE_TOP: i32 = 2;
-
 @group(2) @binding(0) var objTex: texture_2d<f32>;
 @group(2) @binding(1) var objSampler: sampler;
-
-struct ShadingParams {
-  shadowStrength: f32,
-  lightMode: f32,
-  spotYaw: f32,
-  spotPitch: f32,
-  methodIndex: f32,
-  lightIntensity: f32,
-  shadowCaster0: f32,
-  shadowCaster1: f32,
-};
-
-struct Light {
-  pos: vec3<f32>,
-  lightType: f32, // 0 = sun, 1 = spot, 2 = top
-  yaw: f32,
-  pitch: f32,
-  intensity: f32,
-  color: vec3<f32>,
-};
-
-struct LightsData {
-  count: f32,
-  _pad0: vec3<f32>,
-  lights: array<Light, 4>,
-};
 
 @group(3) @binding(0) var<uniform> shading: ShadingParams;
 @group(3) @binding(1) var<uniform> lightsData: LightsData;

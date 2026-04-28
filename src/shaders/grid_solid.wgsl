@@ -1,3 +1,5 @@
+// @include lighting_common
+
 struct VSIn {
   @location(0) position: vec3<f32>,
   @location(1) normal: vec3<f32>,
@@ -19,17 +21,6 @@ struct Uniforms {
   lightDir: vec4<f32>,
   cameraPos: vec4<f32>,
   shadowParams: vec4<f32>,
-};
-
-struct ShadingParams {
-  shadowStrength: f32,
-  lightMode: f32,
-  spotYaw: f32,
-  spotPitch: f32,
-  methodIndex: f32,
-  lightIntensity: f32,
-  shadowCaster0: f32,
-  shadowCaster1: f32,
 };
 
 struct GridParams {
@@ -55,11 +46,6 @@ struct ShadowMatrices {
 @group(2) @binding(0) var floorTex: texture_2d<f32>;
 @group(2) @binding(1) var floorSampler: sampler;
 
-const PI: f32 = 3.14159265;
-const LIGHT_MODE_SUN: i32 = 0;
-const LIGHT_MODE_SPOT: i32 = 1;
-const LIGHT_MODE_TOP: i32 = 2;
-
 const POISSON_16: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
   vec2<f32>(-0.613, 0.354), vec2<f32>(0.743, -0.125),
   vec2<f32>(-0.212, -0.532), vec2<f32>(0.124, 0.987),
@@ -70,21 +56,6 @@ const POISSON_16: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
   vec2<f32>(-0.456, -0.234), vec2<f32>(0.789, 0.654),
   vec2<f32>(-0.888, 0.444), vec2<f32>(0.111, -0.111),
 );
-
-struct Light {
-  pos: vec3<f32>,
-  lightType: f32,  // 0 = sun, 1 = spot, 2 = top
-  yaw: f32,
-  pitch: f32,
-  intensity: f32,
-  color: vec3<f32>,
-};
-
-struct LightsData {
-  count: f32,
-  _pad0: vec3<f32>,
-  lights: array<Light, 4>,
-};
 
 @group(3) @binding(0) var<uniform> shading: ShadingParams;
 @group(3) @binding(1) var<uniform> lightsData: LightsData;
@@ -102,16 +73,10 @@ fn vs_main(input: VSIn) -> VSOut {
 
 fn shadowVisibilityFloor(lightSpacePos: vec4<f32>) -> f32 {
   let ndc = lightSpacePos.xyz / lightSpacePos.w;
-  let uv = vec2<f32>(
-    ndc.x * 0.5 + 0.5,
-    1.0 - (ndc.y * 0.5 + 0.5)
-  );
+  let uv = ndcToUv(ndc);
   // bias храним в u.shadowParams.x для SM/PCF/PCSS
   let depth = ndc.z - u.shadowParams.x;
-
-  let inBounds = ndc.x >= -1.0 && ndc.x <= 1.0 &&
-                 ndc.y >= -1.0 && ndc.y <= 1.0 &&
-                 ndc.z >= 0.0 && ndc.z <= 1.0;
+  let inBounds = isInBounds(ndc);
 
   // Индекс метода: 0=SM,1=PCF,2=PCSS,3=VSM
   let method = i32(round(shading.methodIndex));
@@ -163,52 +128,13 @@ fn computeLightContributionFloor(
   isShadowed: bool,
   lightSpacePos: vec4<f32>
 ) -> f32 {
-  let lightPos = light.pos;
-  let mode = i32(round(light.lightType));
-
-  var L: vec3<f32>;
-  var lambert: f32;
-
-  if (mode == LIGHT_MODE_TOP) {
-    L = normalize(vec3<f32>(0.0, 1.0, 0.0));
-    lambert = max(dot(N, L), 0.0);
-  } else if (mode == LIGHT_MODE_SPOT) {
-    let yaw = light.yaw;
-    let pitch = light.pitch;
-    let axis = vec3<f32>(
-      cos(pitch) * sin(yaw),
-      sin(pitch),
-      cos(pitch) * cos(yaw)
-    );
-
-    let toFrag = normalize(worldPos - lightPos);
-    L = normalize(lightPos - worldPos);
-    lambert = max(dot(N, L), 0.0);
-
-    let cosAngle = dot(toFrag, axis);
-    let innerDeg: f32 = 15.0;
-    let outerDeg: f32 = 25.0;
-    let inner = cos(innerDeg * PI / 180.0);
-    let outer = cos(outerDeg * PI / 180.0);
-    let tSpot = clamp((cosAngle - outer) / (inner - outer), 0.0, 1.0);
-    lambert = lambert * tSpot;
-  } else {
-    L = normalize(lightPos);
-    lambert = max(dot(N, L), 0.0);
-  }
+  let L = computeLightDirection(light, worldPos);
+  let lambert = max(dot(N, L), 0.0) * computeSpotFactor(light, worldPos);
 
   var vis: f32 = 1.0;
   if (isShadowed) {
     let rawVisibility = shadowVisibilityFloor(lightSpacePos);
-
-    let strength = clamp(shading.shadowStrength, 0.0, 2.0);
-    let t = clamp(strength, 0.0, 1.0);
-    vis = mix(1.0, rawVisibility, t);
-
-    if (strength > 1.0) {
-      let extra = strength - 1.0;
-      vis = max(0.0, vis * (1.0 - extra));
-    }
+    vis = mixShadowStrength(rawVisibility, shading.shadowStrength);
   }
 
   let intensity = max(light.intensity, 0.0);
