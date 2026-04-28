@@ -1081,7 +1081,10 @@ export class Renderer {
     console.log('✓ VSM resources created');
   }
 
-  private createBufferFromData(data: BufferSource, usage: GPUBufferUsageFlags): GPUBuffer {
+  private createBufferFromData(
+    data: Float32Array<ArrayBuffer> | Uint16Array<ArrayBuffer>,
+    usage: GPUBufferUsageFlags
+  ): GPUBuffer {
     const { device } = this.gpu;
     const buffer = device.createBuffer({
       size: data.byteLength,

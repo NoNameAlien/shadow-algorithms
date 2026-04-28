@@ -1,15 +1,18 @@
 import { SphereGenerator } from '../geometry/SphereGenerator';
 
+type Float32Data = Float32Array<ArrayBuffer>;
+type Uint16Data = Uint16Array<ArrayBuffer>;
+
 export type MeshGeometry = {
-  positions: Float32Array;
-  normals: Float32Array;
-  uvs: Float32Array;
-  indices: Uint16Array;
+  positions: Float32Data;
+  normals: Float32Data;
+  uvs: Float32Data;
+  indices: Uint16Data;
 };
 
 export type LineGeometry = {
-  vertices: Float32Array;
-  indices: Uint16Array;
+  vertices: Float32Data;
+  indices: Uint16Data;
 };
 
 export function createCubeGeometry(): MeshGeometry {
