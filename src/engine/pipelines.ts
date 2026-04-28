@@ -126,7 +126,8 @@ export function createRendererPipelines(device: GPUDevice, format: GPUTextureFor
       }]
     },
     fragment: { module: axisModule, entryPoint: 'fs_main', targets: [{ format }] },
-    primitive: { topology: 'line-list', cullMode: 'none' }
+    primitive: { topology: 'line-list', cullMode: 'none' },
+    depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' }
   });
   console.log('✓ Axis gizmo pipeline created');
 
@@ -139,7 +140,8 @@ export function createRendererPipelines(device: GPUDevice, format: GPUTextureFor
       buffers: [{ arrayStride: 3 * 4, attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }] }]
     },
     fragment: { module: beamModule, entryPoint: 'fs_main', targets: [{ format }] },
-    primitive: { topology: 'line-list', cullMode: 'none' }
+    primitive: { topology: 'line-list', cullMode: 'none' },
+    depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' }
   });
   console.log('✓ Light beam pipeline created');
 

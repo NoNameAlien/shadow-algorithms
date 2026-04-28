@@ -13,7 +13,7 @@ fn chebyshevUpperBound(moments: vec2<f32>, t: f32) -> f32 {
   }
   
   // Variance = E[X²] - E[X]²
-  let minVariance = u.shadowParams.x;
+  let minVariance = shadowBias(u.shadowParams);
   var variance = max(meanSquare - mean * mean, minVariance);
   
   // Chebyshev: P(X >= t) <= σ² / (σ² + (t - μ)²)
@@ -21,24 +21,21 @@ fn chebyshevUpperBound(moments: vec2<f32>, t: f32) -> f32 {
   var pMax = variance / (variance + d * d);
   
   // Light bleeding reduction: линейное сжатие
-  let bleedReduction = u.shadowParams.y;
+  let bleedReduction = shadowParamY(u.shadowParams);
   pMax = clamp((pMax - bleedReduction) / (1.0 - bleedReduction), 0.0, 1.0);
   
   return pMax;
 }
 
 fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
-  let ndc = lightSpacePos.xyz / lightSpacePos.w;
-  let uv = ndcToUv(ndc);
-  let depth = ndc.z;
-  let inBounds = isInBounds(ndc);
+  let sample = makeUnbiasedShadowSample(lightSpacePos);
   
   // ВСЕГДА читаем моменты (uniform control flow)
-  let moments = textureSample(momentsTex, momentsSampler, uv).rg;
-  let visibility = chebyshevUpperBound(moments, depth);
+  let moments = textureSample(momentsTex, momentsSampler, sample.uv).rg;
+  let visibility = chebyshevUpperBound(moments, sample.depth);
   
   // Возвращаем 1.0 если вне границ, иначе результат VSM
-  return select(visibility, 1.0, !inBounds);
+  return select(visibility, 1.0, !sample.inBounds);
 }
 
 // @include object_single_shadow_main

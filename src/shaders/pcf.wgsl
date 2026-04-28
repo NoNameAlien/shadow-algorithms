@@ -6,14 +6,11 @@
 // @include poisson64
 
 fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
-  let ndc = lightSpacePos.xyz / lightSpacePos.w;
-  let uv = ndcToUv(ndc);
-  let depth = ndc.z - u.shadowParams.x;
-  let inBounds = isInBounds(ndc);
+  let sample = makeShadowSample(lightSpacePos, shadowBias(u.shadowParams));
   
-  let texelSize = 1.0 / u.shadowParams.w;
-  let radius = u.shadowParams.y;
-  let sampleCount = i32(u.shadowParams.z);
+  let texelSize = shadowTexelSize(u.shadowParams);
+  let radius = shadowParamY(u.shadowParams);
+  let sampleCount = i32(shadowParamZ(u.shadowParams));
   
   var shadow: f32 = 0.0;
   
@@ -24,30 +21,30 @@ fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
   if (maxSamples <= 4) {
     for (var i = 0; i < 4; i = i + 1) {
       let offset = POISSON_64[i] * radius * texelSize;
-      shadow += textureSampleCompare(shadowMap, shadowSampler, uv + offset, depth);
+      shadow += textureSampleCompare(shadowMap, shadowSampler, sample.uv + offset, sample.depth);
     }
     shadow /= 4.0;
   } else if (maxSamples <= 8) {
     for (var i = 0; i < 8; i = i + 1) {
       let offset = POISSON_64[i] * radius * texelSize;
-      shadow += textureSampleCompare(shadowMap, shadowSampler, uv + offset, depth);
+      shadow += textureSampleCompare(shadowMap, shadowSampler, sample.uv + offset, sample.depth);
     }
     shadow /= 8.0;
   } else if (maxSamples <= 16) {
     for (var i = 0; i < 16; i = i + 1) {
       let offset = POISSON_64[i] * radius * texelSize;
-      shadow += textureSampleCompare(shadowMap, shadowSampler, uv + offset, depth);
+      shadow += textureSampleCompare(shadowMap, shadowSampler, sample.uv + offset, sample.depth);
     }
     shadow /= 16.0;
   } else {
     for (var i = 0; i < 32; i = i + 1) {
       let offset = POISSON_64[i] * radius * texelSize;
-      shadow += textureSampleCompare(shadowMap, shadowSampler, uv + offset, depth);
+      shadow += textureSampleCompare(shadowMap, shadowSampler, sample.uv + offset, sample.depth);
     }
     shadow /= 32.0;
   }
   
-  return select(shadow, 1.0, !inBounds);
+  return select(shadow, 1.0, !sample.inBounds);
 }
 
 // @include object_single_shadow_main

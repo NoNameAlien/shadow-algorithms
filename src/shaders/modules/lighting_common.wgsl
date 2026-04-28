@@ -2,6 +2,10 @@ const PI: f32 = 3.14159265;
 const LIGHT_MODE_SUN: i32 = 0;
 const LIGHT_MODE_SPOT: i32 = 1;
 const LIGHT_MODE_TOP: i32 = 2;
+const SHADOW_METHOD_SM: i32 = 0;
+const SHADOW_METHOD_PCF: i32 = 1;
+const SHADOW_METHOD_PCSS: i32 = 2;
+const SHADOW_METHOD_VSM: i32 = 3;
 
 struct ShadingParams {
   shadowStrength: f32,
@@ -29,6 +33,36 @@ struct LightsData {
   lights: array<Light, 4>,
 };
 
+struct ShadowSample {
+  uv: vec2<f32>,
+  depth: f32,
+  inBounds: bool,
+};
+
+fn shadowMethodIndex(shadingParams: ShadingParams) -> i32 {
+  return i32(round(shadingParams.methodIndex));
+}
+
+fn shadowBias(shadowParams: vec4<f32>) -> f32 {
+  return shadowParams.x;
+}
+
+fn shadowParamY(shadowParams: vec4<f32>) -> f32 {
+  return shadowParams.y;
+}
+
+fn shadowParamZ(shadowParams: vec4<f32>) -> f32 {
+  return shadowParams.z;
+}
+
+fn shadowMapSize(shadowParams: vec4<f32>) -> f32 {
+  return max(shadowParams.w, 1.0);
+}
+
+fn shadowTexelSize(shadowParams: vec4<f32>) -> f32 {
+  return 1.0 / shadowMapSize(shadowParams);
+}
+
 fn ndcToUv(ndc: vec3<f32>) -> vec2<f32> {
   return vec2<f32>(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5));
 }
@@ -37,6 +71,20 @@ fn isInBounds(ndc: vec3<f32>) -> bool {
   return ndc.x >= -1.0 && ndc.x <= 1.0 &&
          ndc.y >= -1.0 && ndc.y <= 1.0 &&
          ndc.z >= 0.0 && ndc.z <= 1.0;
+}
+
+fn makeShadowSample(lightSpacePos: vec4<f32>, bias: f32) -> ShadowSample {
+  let ndc = lightSpacePos.xyz / lightSpacePos.w;
+
+  return ShadowSample(
+    ndcToUv(ndc),
+    ndc.z - bias,
+    isInBounds(ndc)
+  );
+}
+
+fn makeUnbiasedShadowSample(lightSpacePos: vec4<f32>) -> ShadowSample {
+  return makeShadowSample(lightSpacePos, 0.0);
 }
 
 fn computeLightDirection(light: Light, worldPos: vec3<f32>) -> vec3<f32> {

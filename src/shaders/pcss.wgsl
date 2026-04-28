@@ -2,13 +2,12 @@
 
 @group(1) @binding(0) var shadowMap: texture_depth_2d;
 @group(1) @binding(1) var shadowSampler: sampler_comparison;
-@group(1) @binding(2) var shadowSamplerLinear: sampler;
 
 // @include poisson64
 
 fn findBlockerDistance(uv: vec2<f32>, zReceiver: f32, searchRadius: f32) -> vec2<f32> {
-  let texelSize = 1.0 / u.shadowParams.w;
-  let sampleCount = i32(u.shadowParams.z);
+  let texelSize = shadowTexelSize(u.shadowParams);
+  let sampleCount = i32(shadowParamZ(u.shadowParams));
   
   var blockerSum: f32 = 0.0;
   var numBlockers: f32 = 0.0;
@@ -18,7 +17,8 @@ fn findBlockerDistance(uv: vec2<f32>, zReceiver: f32, searchRadius: f32) -> vec2
   for (var i = 0; i < 8; i = i + 1) {
     if (i < maxSamples) {
       let offset = POISSON_64[i] * searchRadius * texelSize;
-      let shadowMapDepth = textureSampleLevel(shadowMap, shadowSamplerLinear, uv + offset, 0);
+      let coords = vec2<i32>(uv * shadowMapSize(u.shadowParams));
+      let shadowMapDepth = textureLoad(shadowMap, coords, 0);
       
       if (shadowMapDepth < zReceiver) {
         blockerSum += shadowMapDepth;
@@ -36,8 +36,8 @@ fn findBlockerDistance(uv: vec2<f32>, zReceiver: f32, searchRadius: f32) -> vec2
 }
 
 fn pcfFilter(uv: vec2<f32>, zReceiver: f32, filterRadius: f32) -> f32 {
-  let texelSize = 1.0 / u.shadowParams.w;
-  let depth = zReceiver - u.shadowParams.x;
+  let texelSize = shadowTexelSize(u.shadowParams);
+  let depth = zReceiver - shadowBias(u.shadowParams);
   
   var shadow: f32 = 0.0;
   
@@ -51,19 +51,17 @@ fn pcfFilter(uv: vec2<f32>, zReceiver: f32, filterRadius: f32) -> f32 {
 
 
 fn penumbraSize(zReceiver: f32, zBlocker: f32) -> f32 {
-  let lightSize = u.shadowParams.y;
+  let lightSize = shadowParamY(u.shadowParams);
   return max((zReceiver - zBlocker) * lightSize / zBlocker, 0.0);
 }
 
 fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
-  let ndc = lightSpacePos.xyz / lightSpacePos.w;
-  let uv = ndcToUv(ndc);
-  let zReceiver = ndc.z;
-  let inBounds = isInBounds(ndc);
+  let sample = makeUnbiasedShadowSample(lightSpacePos);
+  let zReceiver = sample.depth;
   
   // ВСЕГДА выполняем поиск блокеров (uniform control flow)
-  let searchWidth = u.shadowParams.y * 2.0;
-  let blockerInfo = findBlockerDistance(uv, zReceiver, searchWidth);
+  let searchWidth = shadowParamY(u.shadowParams) * 2.0;
+  let blockerInfo = findBlockerDistance(sample.uv, zReceiver, searchWidth);
   
   // Проверяем наличие блокеров
   let hasBlockers = blockerInfo.x >= 0.0;
@@ -73,14 +71,14 @@ fn shadowVisibility(lightSpacePos: vec4<f32>) -> f32 {
   let filterRadius = max(penumbra * 50.0, 1.0);
   
   // ВСЕГДА выполняем PCF (uniform control flow)
-  let pcfResult = pcfFilter(uv, zReceiver, filterRadius);
+  let pcfResult = pcfFilter(sample.uv, zReceiver, filterRadius);
   
   // Если нет блокеров → 1.0 (полностью освещено)
   // Если есть блокеры → результат PCF
   let shadowResult = select(pcfResult, 1.0, !hasBlockers);
   
   // Если вне границ → 1.0, иначе результат теней
-  return select(shadowResult, 1.0, !inBounds);
+  return select(shadowResult, 1.0, !sample.inBounds);
 }
 
 // @include object_single_shadow_main

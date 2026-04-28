@@ -20,15 +20,21 @@ const modules: Record<string, string> = {
   poisson64: poisson64WGSL
 };
 
-const resolveIncludes = (source: string): string => {
-  const resolved = source.replace(/^\/\/\s*@include\s+([a-zA-Z0-9_-]+)\s*$/gm, (_match, name: string) => {
+const includePattern = /^\/\/\s*@include\s+([a-zA-Z0-9_-]+)\s*$/gm;
+
+const resolveIncludes = (source: string, includeStack: string[] = []): string => {
+  return source.replace(includePattern, (_match, name: string) => {
     const module = modules[name];
     if (!module) {
       throw new Error(`Unknown WGSL include: ${name}`);
     }
-    return module;
+
+    if (includeStack.includes(name)) {
+      throw new Error(`Circular WGSL include: ${[...includeStack, name].join(' -> ')}`);
+    }
+
+    return resolveIncludes(module, [...includeStack, name]);
   });
-  return resolved === source ? resolved : resolveIncludes(resolved);
 };
 
 export const shaders = {

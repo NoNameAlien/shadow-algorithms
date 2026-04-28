@@ -6,17 +6,14 @@
 @group(1) @binding(3) var shadowSampler1: sampler_comparison;
 
 fn shadowVisibilityIndexed(lightSpacePos: vec4<f32>, lightIndex: i32) -> f32 {
-  let ndc = lightSpacePos.xyz / lightSpacePos.w;
-  let uv = ndcToUv(ndc);
-  let depth = ndc.z - u.shadowParams.x;
-  let inBounds = isInBounds(ndc);
+  let sample = makeShadowSample(lightSpacePos, shadowBias(u.shadowParams));
 
   if (lightIndex == 0) {
-    let shadow = textureSampleCompare(shadowMap0, shadowSampler0, uv, depth);
-    return select(shadow, 1.0, !inBounds);
+    let shadow = textureSampleCompare(shadowMap0, shadowSampler0, sample.uv, sample.depth);
+    return select(shadow, 1.0, !sample.inBounds);
   } else {
-    let shadow = textureSampleCompare(shadowMap1, shadowSampler1, uv, depth);
-    return select(shadow, 1.0, !inBounds);
+    let shadow = textureSampleCompare(shadowMap1, shadowSampler1, sample.uv, sample.depth);
+    return select(shadow, 1.0, !sample.inBounds);
   }
 }
 

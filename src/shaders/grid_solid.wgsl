@@ -1,4 +1,5 @@
 // @include lighting_common
+// @include poisson64
 
 struct VSIn {
   @location(0) position: vec3<f32>,
@@ -46,17 +47,6 @@ struct ShadowMatrices {
 @group(2) @binding(0) var floorTex: texture_2d<f32>;
 @group(2) @binding(1) var floorSampler: sampler;
 
-const POISSON_16: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
-  vec2<f32>(-0.613, 0.354), vec2<f32>(0.743, -0.125),
-  vec2<f32>(-0.212, -0.532), vec2<f32>(0.124, 0.987),
-  vec2<f32>(-0.945, -0.123), vec2<f32>(0.432, 0.456),
-  vec2<f32>(-0.321, 0.765), vec2<f32>(0.876, 0.321),
-  vec2<f32>(-0.111, -0.987), vec2<f32>(0.234, -0.654),
-  vec2<f32>(-0.765, 0.111), vec2<f32>(0.567, -0.876),
-  vec2<f32>(-0.456, -0.234), vec2<f32>(0.789, 0.654),
-  vec2<f32>(-0.888, 0.444), vec2<f32>(0.111, -0.111),
-);
-
 @group(3) @binding(0) var<uniform> shading: ShadingParams;
 @group(3) @binding(1) var<uniform> lightsData: LightsData;
 
@@ -72,30 +62,24 @@ fn vs_main(input: VSIn) -> VSOut {
 }
 
 fn shadowVisibilityFloor(lightSpacePos: vec4<f32>) -> f32 {
-  let ndc = lightSpacePos.xyz / lightSpacePos.w;
-  let uv = ndcToUv(ndc);
-  // bias храним в u.shadowParams.x для SM/PCF/PCSS
-  let depth = ndc.z - u.shadowParams.x;
-  let inBounds = isInBounds(ndc);
-
-  // Индекс метода: 0=SM,1=PCF,2=PCSS,3=VSM
-  let method = i32(round(shading.methodIndex));
+  let sample = makeShadowSample(lightSpacePos, shadowBias(u.shadowParams));
+  let method = shadowMethodIndex(shading);
 
   var radius: f32;
   var samples: i32;
   var invSize: f32;
 
-  if (method == 1) {
+  if (method == SHADOW_METHOD_PCF) {
     // PCF: радиус и количество сэмплов из параметров
-    radius = u.shadowParams.y;                // pcfRadius
-    samples = i32(u.shadowParams.z);         // pcfSamples
-    invSize = 1.0 / max(u.shadowParams.w, 1.0); // shadowMapSize
-  } else if (method == 2) {
+    radius = shadowParamY(u.shadowParams);     // pcfRadius
+    samples = i32(shadowParamZ(u.shadowParams)); // pcfSamples
+    invSize = shadowTexelSize(u.shadowParams);
+  } else if (method == SHADOW_METHOD_PCSS) {
     // PCSS: используем lightSize как эффективный радиус
-    radius = u.shadowParams.y * 2.0;         // pcssLightSize → ширина
+    radius = shadowParamY(u.shadowParams) * 2.0; // pcssLightSize -> width
     samples = 16;
-    invSize = 1.0 / max(u.shadowParams.w, 1.0);
-  } else if (method == 3) {
+    invSize = shadowTexelSize(u.shadowParams);
+  } else if (method == SHADOW_METHOD_VSM) {
     // VSM: для пола пока даём мягкий PCF средней силы
     radius = 1.5;
     samples = 16;
@@ -104,7 +88,7 @@ fn shadowVisibilityFloor(lightSpacePos: vec4<f32>) -> f32 {
     // SM: один sample (жёсткие тени)
     radius = 0.0;
     samples = 1;
-    invSize = 1.0 / max(u.shadowParams.w, 1.0);
+    invSize = shadowTexelSize(u.shadowParams);
   }
 
   let maxSamples = max(1, min(samples, 16));
@@ -113,12 +97,12 @@ fn shadowVisibilityFloor(lightSpacePos: vec4<f32>) -> f32 {
   for (var i = 0; i < 16; i = i + 1) {
     if (i < maxSamples) {
       let offset = POISSON_16[i] * radius * invSize;
-      shadow += textureSampleCompare(shadowMap, shadowSampler, uv + offset, depth);
+      shadow += textureSampleCompare(shadowMap, shadowSampler, sample.uv + offset, sample.depth);
     }
   }
   shadow = shadow / f32(maxSamples);
 
-  return select(shadow, 1.0, !inBounds);
+  return select(shadow, 1.0, !sample.inBounds);
 }
 
 fn computeLightContributionFloor(
