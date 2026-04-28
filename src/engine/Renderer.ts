@@ -1,132 +1,32 @@
 import { mat4, vec3, vec4 } from 'gl-matrix';
 import { initWebGPU } from '../gpu/initWebGPU';
-import basicWGSL from '../shaders/basic.wgsl?raw';
-import pcfWGSL from '../shaders/pcf.wgsl?raw';
-import pcssWGSL from '../shaders/pcss.wgsl?raw';
-import depthWGSL from '../shaders/depth.wgsl?raw';
-import vsmMomentsWGSL from '../shaders/vsm_moments.wgsl?raw';
-import vsmBlurWGSL from '../shaders/vsm_blur.wgsl?raw';
-import vsmWGSL from '../shaders/vsm.wgsl?raw';
 import { ArcballController } from './ArcballController';
 import { ModelLoader } from '../loaders/ModelLoader';
-import gridSolidWGSL from '../shaders/grid_solid.wgsl?raw';
-import lightBeamWGSL from '../shaders/light_beam.wgsl?raw';
-import { SphereGenerator } from '../geometry/SphereGenerator';
 import { CameraController } from './CameraController';
-import axisGizmoWGSL from '../shaders/axis_gizmo.wgsl?raw';
+import {
+  createAxisGizmoGeometry,
+  createCubeGeometry,
+  createGridGeometry,
+  createLightMeshesGeometry,
+  createWallsGeometry
+} from './geometryData';
+import { orthoZO } from './math';
+import { createRendererPipelines } from './pipelines';
+import { createSolidTexture, createTextureFromImageFile } from './textureUtils';
+import type {
+  GPUCtx,
+  LightDTO,
+  LightDef,
+  LightMode,
+  MeshDef,
+  ObjectDTO,
+  SceneDTO,
+  SceneObject,
+  Selection,
+  ShadowMethod
+} from './types';
 
-type GPUCtx = {
-  device: GPUDevice;
-  context: GPUCanvasContext;
-  format: GPUTextureFormat;
-  configure: () => void;
-};
-type Selection = 'none' | 'object' | 'light';
-
-type LightDef = {
-  pos: vec3;
-  type: LightMode;
-  yaw: number;
-  pitch: number;
-  intensity: number;
-  color: vec3;
-  castShadows: boolean;
-};
-
-type SceneObject = {
-  id: number;
-  pos: vec3;
-  moveSpeed: number;
-  color: vec3;
-  castShadows: boolean;
-  receiveShadows: boolean;
-  meshId: number;
-  specular: number;
-  shininess: number;
-};
-
-type MeshDef = {
-  id: number;
-  name: string;
-  vbo: GPUBuffer;
-  nbo: GPUBuffer;
-  tbo: GPUBuffer;
-  ibo: GPUBuffer;
-  indexCount: number;
-};
-
-type LightDTO = {
-  pos: [number, number, number];
-  type: LightMode;
-  yaw: number;
-  pitch: number;
-  intensity: number;
-  color: [number, number, number];
-  castShadows: boolean;
-};
-
-type ObjectDTO = {
-  pos: [number, number, number];
-  moveSpeed: number;
-  color: [number, number, number];
-  castShadows: boolean;
-  receiveShadows: boolean;
-  meshId: number;
-  specular: number;
-  shininess: number;
-};
-
-type ShadowParamsDTO = {
-  shadowMapSize: number;
-  bias: number;
-  method: ShadowMethod;
-  pcfRadius: number;
-  pcfSamples: number;
-  pcssLightSize: number;
-  pcssBlockerSearchSamples: number;
-  vsmMinVariance: number;
-  vsmLightBleedReduction: number;
-  shadowStrength: number;
-};
-
-type SceneDTO = {
-  lights: LightDTO[];
-  objects: ObjectDTO[];
-  floorColor: [number, number, number];
-  wallColor: [number, number, number];
-  showFloor: boolean;
-  showWalls: boolean;
-  shadowParams: ShadowParamsDTO;
-};
-
-export type ShadowMethod = 'SM' | 'PCF' | 'PCSS' | 'VSM';
-export type LightMode = 'sun' | 'spot' | 'top';
-
-function orthoZO(out: mat4, left: number, right: number, bottom: number, top: number, near: number, far: number) {
-  const lr = 1 / (left - right);
-  const bt = 1 / (bottom - top);
-  const nf = 1 / (near - far);
-
-  out[0] = -2 * lr;
-  out[1] = 0;
-  out[2] = 0;
-  out[3] = 0;
-
-  out[4] = 0;
-  out[5] = -2 * bt;
-  out[6] = 0;
-  out[7] = 0;
-
-  out[8] = 0;
-  out[9] = 0;
-  out[10] = nf;
-  out[11] = 0;
-
-  out[12] = (left + right) * lr;
-  out[13] = (top + bottom) * bt;
-  out[14] = near * nf;
-  out[15] = 1;
-}
+export type { LightMode, ShadowMethod } from './types';
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -167,15 +67,6 @@ export class Renderer {
   private vsmBlurTex!: GPUTexture;
   private vsmBlurView!: GPUTextureView;
   private vsmSampler!: GPUSampler;
-
-  private lightSunVBO!: GPUBuffer;
-  private lightSunIBO!: GPUBuffer;
-
-  private lightSpotVBO!: GPUBuffer;
-  private lightSpotIBO!: GPUBuffer;
-
-  private lightTopVBO!: GPUBuffer;
-  private lightTopIBO!: GPUBuffer;
 
   private lightBeamPipeline!: GPURenderPipeline;
   private lightBeamVBO!: GPUBuffer;
@@ -621,13 +512,6 @@ export class Renderer {
 
   setWallColor(rgb: [number, number, number]) {
     vec3.set(this.wallColor, rgb[0], rgb[1], rgb[2]);
-  }
-
-  private getShadowCasterIndex(): number {
-    for (let i = 0; i < this.lights.length; i++) {
-      if (this.lights[i].castShadows) return i;
-    }
-    return -1;
   }
 
   private getShadowCasters(max: number): number[] {
@@ -1150,263 +1034,18 @@ export class Renderer {
 
   private async createPipelines() {
     const { device, format } = this.gpu;
+    const pipelines = createRendererPipelines(device, format);
 
-    const posLayout: GPUVertexBufferLayout = {
-      arrayStride: 3 * 4,
-      attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }]
-    };
-
-    const mainVertexBuffers: GPUVertexBufferLayout[] = [
-      // position
-      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }] },
-      // normal
-      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 1, format: 'float32x3', offset: 0 }] },
-      // uv
-      { arrayStride: 2 * 4, attributes: [{ shaderLocation: 2, format: 'float32x2', offset: 0 }] }
-    ];
-
-    const gridVertexBuffers: GPUVertexBufferLayout[] = [
-      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }] },
-      { arrayStride: 3 * 4, attributes: [{ shaderLocation: 1, format: 'float32x3', offset: 0 }] },
-      { arrayStride: 2 * 4, attributes: [{ shaderLocation: 2, format: 'float32x2', offset: 0 }] }
-    ];
-
-    this.createShadowPipeline(device, posLayout);
-    this.createMainPipelines(device, format, mainVertexBuffers);
-    this.createVSMPipelines(device, format, mainVertexBuffers, posLayout);
-    this.createGridPipeline(device, format, gridVertexBuffers);
-    this.createLightAndAxisPipelines(device, format);
-  }
-
-  private createShadowPipeline(device: GPUDevice, posLayout: GPUVertexBufferLayout) {
-    const depthModule = device.createShaderModule({ code: depthWGSL });
-    this.shadowPipeline = device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: depthModule, entryPoint: 'vs_main', buffers: [posLayout] },
-      primitive: { topology: 'triangle-list', cullMode: 'back' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' }
-    });
-    console.log('✓ Shadow pipeline created');
-  }
-
-  private createMainPipelines(
-    device: GPUDevice,
-    format: GPUTextureFormat,
-    vertexBuffers: GPUVertexBufferLayout[]
-  ) {
-    // SM
-    const smModule = device.createShaderModule({ code: basicWGSL });
-    this.pipelineSM = device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: smModule, entryPoint: 'vs_main', buffers: vertexBuffers },
-      fragment: { module: smModule, entryPoint: 'fs_main', targets: [{ format }] },
-      primitive: { topology: 'triangle-list', cullMode: 'back' },
-      depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' }
-    });
-    console.log('✓ SM pipeline created');
-
-    // PCF
-    const pcfModule = device.createShaderModule({ code: pcfWGSL });
-    this.pipelinePCF = device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: pcfModule, entryPoint: 'vs_main', buffers: vertexBuffers },
-      fragment: { module: pcfModule, entryPoint: 'fs_main', targets: [{ format }] },
-      primitive: { topology: 'triangle-list', cullMode: 'back' },
-      depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' }
-    });
-    console.log('✓ PCF pipeline created');
-
-    // PCSS
-    const pcssModule = device.createShaderModule({ code: pcssWGSL });
-    this.pipelinePCSS = device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: pcssModule, entryPoint: 'vs_main', buffers: vertexBuffers },
-      fragment: { module: pcssModule, entryPoint: 'fs_main', targets: [{ format }] },
-      primitive: { topology: 'triangle-list', cullMode: 'back' },
-      depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' }
-    });
-    console.log('✓ PCSS pipeline created');
-  }
-
-  private createVSMPipelines(
-    device: GPUDevice,
-    format: GPUTextureFormat,
-    vertexBuffers: GPUVertexBufferLayout[],
-    posLayout: GPUVertexBufferLayout
-  ) {
-    // VSM moments (запись моментов в rgba16float)
-    const vsmMomentsModule = device.createShaderModule({ code: vsmMomentsWGSL });
-    this.vsmMomentsPipeline = device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: vsmMomentsModule, entryPoint: 'vs_main', buffers: [posLayout] },
-      fragment: {
-        module: vsmMomentsModule,
-        entryPoint: 'fs_main',
-        targets: [{ format: 'rgba16float' }]
-      },
-      primitive: { topology: 'triangle-list', cullMode: 'back' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' }
-    });
-    console.log('✓ VSM moments pipeline created');
-
-    // VSM shading
-    const vsmModule = device.createShaderModule({ code: vsmWGSL });
-    this.pipelineVSM = device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: vsmModule, entryPoint: 'vs_main', buffers: vertexBuffers },
-      fragment: { module: vsmModule, entryPoint: 'fs_main', targets: [{ format }] },
-      primitive: { topology: 'triangle-list', cullMode: 'back' },
-      depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' }
-    });
-    console.log('✓ VSM pipeline created');
-
-    // Blur (compute)
-    const blurModule = device.createShaderModule({ code: vsmBlurWGSL });
-    this.blurHorizontalPipeline = device.createComputePipeline({
-      layout: 'auto',
-      compute: { module: blurModule, entryPoint: 'cs_horizontal' }
-    });
-    console.log('✓ Blur pipeline created');
-  }
-
-  private createGridPipeline(
-    device: GPUDevice,
-    format: GPUTextureFormat,
-    gridBuffers: GPUVertexBufferLayout[]
-  ) {
-    const gridSolidModule = device.createShaderModule({ code: gridSolidWGSL });
-    this.gridPipeline = device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: gridSolidModule, entryPoint: 'vs_main', buffers: gridBuffers },
-      fragment: {
-        module: gridSolidModule,
-        entryPoint: 'fs_main',
-        targets: [{
-          format,
-          blend: {
-            color: {
-              srcFactor: 'src-alpha',
-              dstFactor: 'one-minus-src-alpha',
-              operation: 'add'
-            },
-            alpha: {
-              srcFactor: 'one',
-              dstFactor: 'one-minus-src-alpha',
-              operation: 'add'
-            }
-          }
-        }]
-      },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: {
-        format: 'depth24plus',
-        depthWriteEnabled: true,
-        depthCompare: 'less'
-      }
-    });
-    console.log('✓ Grid pipeline created');
-  }
-
-  private createLightAndAxisPipelines(device: GPUDevice, format: GPUTextureFormat) {
-    // Axis gizmo (оси/окружность)
-    const axisModule = device.createShaderModule({ code: axisGizmoWGSL });
-    const axisBufferLayout: GPUVertexBufferLayout = {
-      arrayStride: 6 * 4, // 3 pos + 3 color
-      attributes: [
-        { shaderLocation: 0, format: 'float32x3', offset: 0 },
-        { shaderLocation: 1, format: 'float32x3', offset: 3 * 4 }
-      ]
-    };
-
-    this.axisPipeline = device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: axisModule, entryPoint: 'vs_main', buffers: [axisBufferLayout] },
-      fragment: {
-        module: axisModule,
-        entryPoint: 'fs_main',
-        targets: [{ format }]
-      },
-      primitive: { topology: 'line-list', cullMode: 'none' }
-      // без depthStencil → gizmo поверх всего
-    });
-    console.log('✓ Axis gizmo pipeline created');
-
-    // Пайплайн для луча (линия от источника к полу)
-    const beamModule = device.createShaderModule({ code: lightBeamWGSL });
-    const beamLayout: GPUVertexBufferLayout = {
-      arrayStride: 3 * 4,
-      attributes: [{ shaderLocation: 0, format: 'float32x3', offset: 0 }]
-    };
-    this.lightBeamPipeline = device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: beamModule, entryPoint: 'vs_main', buffers: [beamLayout] },
-      fragment: {
-        module: beamModule,
-        entryPoint: 'fs_main',
-        targets: [{ format }]
-      },
-      primitive: { topology: 'line-list', cullMode: 'none' }
-      // без depthStencil → рисуем поверх сцены
-    });
-    console.log('✓ Light beam pipeline created');
-  }
-
-  // Загружает изображение из File и создаёт из него GPU-текстуру RGBA8
-  private async createTextureFromImageFile(file: File): Promise<{ texture: GPUTexture; view: GPUTextureView }> {
-    const { device } = this.gpu;
-
-    // 1) Декодируем файл в <img>
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    URL.revokeObjectURL(url);
-
-    const width = img.width;
-    const height = img.height;
-
-    // 2) Рисуем на canvas и читаем пиксели
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      throw new Error('Не удалось создать 2D контекст для загрузки текстуры');
-    }
-
-    // Можно сделать flipY при необходимости: ctx.scale(1, -1); ctx.translate(0, -height);
-    ctx.drawImage(img, 0, 0);
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const src = imageData.data; // Uint8ClampedArray RGBA
-
-    // 3) Подготавливаем выровненный по 256 байтам буфер
-    const bytesPerPixel = 4;
-    const unpaddedRowSize = width * bytesPerPixel;
-    const paddedRowSize = Math.ceil(unpaddedRowSize / 256) * 256;
-    const dst = new Uint8Array(paddedRowSize * height);
-
-    for (let y = 0; y < height; y++) {
-      const srcOffset = y * unpaddedRowSize;
-      const dstOffset = y * paddedRowSize;
-      dst.set(src.subarray(srcOffset, srcOffset + unpaddedRowSize), dstOffset);
-    }
-
-    // 4) Создаём текстуру и пишем данные
-    const texture = device.createTexture({
-      size: [width, height],
-      format: 'rgba8unorm', // простой UNORM, без sRGB, чтобы исключить артефакты
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-    });
-
-    device.queue.writeTexture(
-      { texture },
-      dst,
-      { bytesPerRow: paddedRowSize },
-      { width, height }
-    );
-
-    const view = texture.createView();
-    return { texture, view };
+    this.pipelineSM = pipelines.pipelineSM;
+    this.pipelinePCF = pipelines.pipelinePCF;
+    this.pipelinePCSS = pipelines.pipelinePCSS;
+    this.pipelineVSM = pipelines.pipelineVSM;
+    this.vsmMomentsPipeline = pipelines.vsmMomentsPipeline;
+    this.blurHorizontalPipeline = pipelines.blurHorizontalPipeline;
+    this.shadowPipeline = pipelines.shadowPipeline;
+    this.gridPipeline = pipelines.gridPipeline;
+    this.lightBeamPipeline = pipelines.lightBeamPipeline;
+    this.axisPipeline = pipelines.axisPipeline;
   }
 
   private createVSMResources() {
@@ -1442,69 +1081,23 @@ export class Renderer {
     console.log('✓ VSM resources created');
   }
 
-  private createGeometry() {
+  private createBufferFromData(data: BufferSource, usage: GPUBufferUsageFlags): GPUBuffer {
     const { device } = this.gpu;
-    const positions = new Float32Array([
-      // Куб 2x2x2 (от -1 до 1)
-      -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1, // front
-      -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1, -1, // back
-      1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, // right
-      -1, -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1, // left
-      -1, 1, 1, 1, 1, 1, 1, 1, -1, -1, 1, -1, // top
-      -1, -1, 1, -1, -1, -1, 1, -1, -1, 1, -1, 1, // bottom
-    ]);
-    const normals = new Float32Array([
-      // front
-      0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
-      // back
-      0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1,
-      // right
-      1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
-      // left
-      -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
-      // top
-      0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
-      // bottom
-      0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0,
-    ]);
+    const buffer = device.createBuffer({
+      size: data.byteLength,
+      usage: usage | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(buffer, 0, data);
+    return buffer;
+  }
 
-    // Простейшая развёртка: каждый quad 0..1
-    const uvs = new Float32Array([
-      // front
-      0, 0, 1, 0, 1, 1, 0, 1,
-      // back
-      0, 0, 0, 1, 1, 1, 1, 0,
-      // right
-      0, 0, 1, 0, 1, 1, 0, 1,
-      // left
-      0, 0, 1, 0, 1, 1, 0, 1,
-      // top
-      0, 0, 1, 0, 1, 1, 0, 1,
-      // bottom
-      0, 0, 0, 1, 1, 1, 1, 0,
-    ]);
-
-    const indices = new Uint16Array([
-      0, 1, 2, 0, 2, 3,    // front
-      4, 5, 6, 4, 6, 7,    // back
-      8, 9, 10, 8, 10, 11,    // right
-      12, 13, 14, 12, 14, 15,   // left
-      16, 17, 18, 16, 18, 19,   // top
-      20, 21, 22, 20, 22, 23,   // bottom
-    ]);
-    this.indexCount = indices.length;
-
-    this.vbo = device.createBuffer({ size: positions.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(this.vbo, 0, positions);
-
-    this.nbo = device.createBuffer({ size: normals.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(this.nbo, 0, normals);
-
-    this.tbo = device.createBuffer({ size: uvs.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(this.tbo, 0, uvs);
-
-    this.ibo = device.createBuffer({ size: indices.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(this.ibo, 0, indices);
+  private createGeometry() {
+    const cube = createCubeGeometry();
+    this.indexCount = cube.indices.length;
+    this.vbo = this.createBufferFromData(cube.positions, GPUBufferUsage.VERTEX);
+    this.nbo = this.createBufferFromData(cube.normals, GPUBufferUsage.VERTEX);
+    this.tbo = this.createBufferFromData(cube.uvs, GPUBufferUsage.VERTEX);
+    this.ibo = this.createBufferFromData(cube.indices, GPUBufferUsage.INDEX);
 
     this.meshes = [];
     const mesh: MeshDef = {
@@ -1521,310 +1114,32 @@ export class Renderer {
   }
 
   private createGrid() {
-    const { device } = this.gpu;
-
-    // Большая плоскость 20×20 с нормалями (для теней)
-    const gridPos = new Float32Array([
-      -10, -2.5, -10, 10, -2.5, -10, 10, -2.5, 10,
-      -10, -2.5, -10, 10, -2.5, 10, -10, -2.5, 10
-    ]);
-
-    const gridNorm = new Float32Array([
-      0, 1, 0, 0, 1, 0, 0, 1, 0,
-      0, 1, 0, 0, 1, 0, 0, 1, 0
-    ]);
-
-    const gridUV = new Float32Array([
-      0, 0, 5, 0, 5, 5,
-      0, 0, 5, 5, 0, 5
-    ]);
-
-    this.gridVBO = device.createBuffer({
-      size: gridPos.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.gridVBO, 0, gridPos);
-
-    this.gridNBO = device.createBuffer({
-      size: gridNorm.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.gridNBO, 0, gridNorm);
-
-    this.gridTBO = device.createBuffer({
-      size: gridUV.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.gridTBO, 0, gridUV);
+    const grid = createGridGeometry();
+    this.gridVBO = this.createBufferFromData(grid.positions, GPUBufferUsage.VERTEX);
+    this.gridNBO = this.createBufferFromData(grid.normals, GPUBufferUsage.VERTEX);
+    this.gridTBO = this.createBufferFromData(grid.uvs, GPUBufferUsage.VERTEX);
   }
 
   private createWalls() {
-    const { device } = this.gpu;
-
-    const yBottom = -2.5;
-    const yTop = 7.5;
-    const xMin = -10, xMax = 10;
-    const zMin = -10, zMax = 10;
-
-    // Задняя стена (z = -10), смотрит внутрь (нормаль +Z)
-    const backPos = [
-      xMin, yBottom, zMin,
-      xMax, yBottom, zMin,
-      xMax, yTop, zMin,
-      xMin, yBottom, zMin,
-      xMax, yTop, zMin,
-      xMin, yTop, zMin,
-    ];
-    const backNorm = [
-      0, 0, 1, 0, 0, 1, 0, 0, 1,
-      0, 0, 1, 0, 0, 1, 0, 0, 1
-    ];
-    const backUV = [
-      0, 0, 5, 0, 5, 5,
-      0, 0, 5, 5, 0, 5
-    ];
-
-    // Правая стена (x = 10), смотрит внутрь (нормаль -X)
-    const rightPos = [
-      xMax, yBottom, zMin,
-      xMax, yBottom, zMax,
-      xMax, yTop, zMax,
-      xMax, yBottom, zMin,
-      xMax, yTop, zMax,
-      xMax, yTop, zMin,
-    ];
-    const rightNorm = [
-      -1, 0, 0, -1, 0, 0, -1, 0, 0,
-      -1, 0, 0, -1, 0, 0, -1, 0, 0
-    ];
-    const rightUV = [
-      0, 0, 5, 0, 5, 5,
-      0, 0, 5, 5, 0, 5
-    ];
-
-    const pos = new Float32Array([...backPos, ...rightPos]);
-    const norm = new Float32Array([...backNorm, ...rightNorm]);
-    const uv = new Float32Array([...backUV, ...rightUV]);
-
-    this.wallVBO = device.createBuffer({
-      size: pos.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.wallVBO, 0, pos);
-
-    this.wallNBO = device.createBuffer({
-      size: norm.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.wallNBO, 0, norm);
-
-    this.wallTBO = device.createBuffer({
-      size: uv.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.wallTBO, 0, uv);
+    const walls = createWallsGeometry();
+    this.wallVBO = this.createBufferFromData(walls.positions, GPUBufferUsage.VERTEX);
+    this.wallNBO = this.createBufferFromData(walls.normals, GPUBufferUsage.VERTEX);
+    this.wallTBO = this.createBufferFromData(walls.uvs, GPUBufferUsage.VERTEX);
   }
 
   private createLightSphere() {
-    const { device } = this.gpu;
+    const { beam } = createLightMeshesGeometry();
 
-    // 1) Sun: icosphere
-    const sphere = SphereGenerator.createIcosphere(0.4, 1);
-
-    this.lightSunVBO = device.createBuffer({
-      size: sphere.positions.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.lightSunVBO, 0, sphere.positions.buffer);
-
-    this.lightSunIBO = device.createBuffer({
-      size: sphere.indices.byteLength,
-      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.lightSunIBO, 0, sphere.indices.buffer);
-
-    // 2) Spot: простой конус вдоль +Y (основание внизу, вершина вверху)
-    const coneSegments = 16;
-    const coneVerts: number[] = [];
-    const coneIndices: number[] = [];
-
-    const coneRadius = 0.5;
-    const coneHeight = 1.0;
-    const tipY = coneHeight * 0.5;
-    const baseY = -coneHeight * 0.5;
-
-    // Вершина конуса
-    coneVerts.push(0, tipY, 0);
-
-    // Кольцо основания
-    for (let i = 0; i < coneSegments; i++) {
-      const a = (i / coneSegments) * Math.PI * 2;
-      const x = Math.cos(a) * coneRadius;
-      const z = Math.sin(a) * coneRadius;
-      coneVerts.push(x, baseY, z);
-    }
-
-    // Треугольники боковой поверхности
-    for (let i = 0; i < coneSegments; i++) {
-      const i0 = 0;                     // tip
-      const i1 = 1 + i;                 // текущая точка основания
-      const i2 = 1 + ((i + 1) % coneSegments); // следующая точка основания
-      coneIndices.push(i0, i1, i2);
-    }
-
-
-    this.lightSpotVBO = device.createBuffer({
-      size: coneVerts.length * 4,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.lightSpotVBO, 0, new Float32Array(coneVerts));
-
-    this.lightSpotIBO = device.createBuffer({
-      size: coneIndices.length * 2,
-      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.lightSpotIBO, 0, new Uint16Array(coneIndices));
-
-    // 3) Top: обратный конус вдоль -Y (остриём вниз)
-    const topSegments = 16;
-    const topVerts: number[] = [];
-    const topIndices: number[] = [];
-
-    const topRadius = 0.5;
-    const topHeight = 1.0;
-    const topTipY = -topHeight * 0.5;   // остриё внизу
-    const topBaseY = topHeight * 0.5;   // основание наверху
-
-    // Вершина (остриё) конуса сверху вниз (index 0)
-    topVerts.push(0, topTipY, 0);
-
-    // Кольцо основания (index 1..topSegments)
-    for (let i = 0; i < topSegments; i++) {
-      const a = (i / topSegments) * Math.PI * 2;
-      const x = Math.cos(a) * topRadius;
-      const z = Math.sin(a) * topRadius;
-      topVerts.push(x, topBaseY, z);
-    }
-
-    // Центр основания (index = 1 + topSegments)
-    const baseCenterIndex = 1 + topSegments;
-    topVerts.push(0, topBaseY, 0);
-
-    // Боковая поверхность
-    for (let i = 0; i < topSegments; i++) {
-      const i0 = 0;                           // tip
-      const i1 = 1 + i;                       // текущая точка основания
-      const i2 = 1 + ((i + 1) % topSegments); // следующая точка основания
-      topIndices.push(i0, i1, i2);
-    }
-
-    // Донышко (основание) — веер из треугольников
-    for (let i = 0; i < topSegments; i++) {
-      const i1 = 1 + i;
-      const i2 = 1 + ((i + 1) % topSegments);
-      // порядок вершин выбираем так, чтобы нормаль смотрела наружу (вверх)
-      topIndices.push(baseCenterIndex, i2, i1);
-    }
-
-
-    this.lightTopVBO = device.createBuffer({
-      size: topVerts.length * 4,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.lightTopVBO, 0, new Float32Array(topVerts));
-
-    this.lightTopIBO = device.createBuffer({
-      size: topIndices.length * 2,
-      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.lightTopIBO, 0, new Uint16Array(topIndices));
-
-    console.log('✓ Light meshes (sun/spot/top) created');
-
-    // Геометрия луча: одна линия (2 вершины), позиции обновляем каждый кадр
-    const beamVerts = new Float32Array(2 * 3); // [0,0,0], [0,0,0] — заполним позже
-    const beamIdx = new Uint16Array([0, 1]);
-
-    this.lightBeamVBO = device.createBuffer({
-      size: beamVerts.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.lightBeamVBO, 0, beamVerts);
-
-    this.lightBeamIBO = device.createBuffer({
-      size: beamIdx.byteLength,
-      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.lightBeamIBO, 0, beamIdx);
-
+    this.lightBeamVBO = this.createBufferFromData(beam.vertices, GPUBufferUsage.VERTEX);
+    this.lightBeamIBO = this.createBufferFromData(beam.indices, GPUBufferUsage.INDEX);
     this.lightBeamIndexCount = 2;
-
   }
 
   private createAxisGizmo() {
-    const { device } = this.gpu;
-    const size = 2.2; // длина осей, чуть больше
-    const verts: number[] = [];
-    const idx: number[] = [];
-    let base = 0;
-
-    const pushLine = (
-      x1: number, y1: number, z1: number,
-      x2: number, y2: number, z2: number,
-      r: number, g: number, b: number
-    ) => {
-      verts.push(
-        x1, y1, z1, r, g, b,
-        x2, y2, z2, r, g, b
-      );
-      idx.push(base, base + 1);
-      base += 2;
-    };
-
-    // Одна линия на каждую ось
-
-    // X axis (красный)
-    pushLine(0, 0, 0, size, 0, 0, 1, 0, 0);
-
-    // Y axis (зелёный)
-    pushLine(0, 0, 0, 0, size, 0, 0, 1, 0);
-    pushLine(0, 0, 0, 0, -size, 0, 0, 1, 0);
-
-    // Z axis (синий)
-    pushLine(0, 0, 0, 0, 0, size, 0, 0, 1);
-
-    // ОКРУЖНОСТЬ в плоскости XZ (белая) — "ось" вращения вокруг Y
-    const circleRadius = size * 0.9;
-    const circleSegments = 32;
-
-    for (let i = 0; i < circleSegments; i++) {
-      const a0 = (i / circleSegments) * Math.PI * 2;
-      const a1 = ((i + 1) / circleSegments) * Math.PI * 2;
-
-      const x0 = Math.cos(a0) * circleRadius;
-      const z0 = Math.sin(a0) * circleRadius;
-      const x1 = Math.cos(a1) * circleRadius;
-      const z1 = Math.sin(a1) * circleRadius;
-
-      pushLine(x0, 0, z0, x1, 0, z1, 1, 1, 1);
-    }
-
-    const vertices = new Float32Array(verts);
-    const indices = new Uint16Array(idx);
-
-    this.axisIndexCount = indices.length;
-
-    this.axisVBO = device.createBuffer({
-      size: vertices.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.axisVBO, 0, vertices);
-
-    this.axisIBO = device.createBuffer({
-      size: indices.byteLength,
-      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
-    });
-    device.queue.writeBuffer(this.axisIBO, 0, indices);
+    const axis = createAxisGizmoGeometry();
+    this.axisIndexCount = axis.indices.length;
+    this.axisVBO = this.createBufferFromData(axis.vertices, GPUBufferUsage.VERTEX);
+    this.axisIBO = this.createBufferFromData(axis.indices, GPUBufferUsage.INDEX);
 
     console.log('✓ Axis gizmo geometry created');
   }
@@ -2016,25 +1331,13 @@ export class Renderer {
 
   private createDefaultTextures() {
     const { device } = this.gpu;
+    const objectTexture = createSolidTexture(device, 200, 200, 200);
+    const floorTexture = createSolidTexture(device, 120, 120, 120);
 
-    const createSolidTex = (r: number, g: number, b: number): [GPUTexture, GPUTextureView] => {
-      const tex = device.createTexture({
-        size: [1, 1],
-        format: 'rgba8unorm',      // БЫЛО 'rgba8unorm-srgb'
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-      });
-      const data = new Uint8Array([r, g, b, 255]);
-      device.queue.writeTexture(
-        { texture: tex },
-        data,
-        { bytesPerRow: 4 },
-        { width: 1, height: 1 }
-      );
-      return [tex, tex.createView()];
-    };
-
-    [this.objTexture, this.objTextureView] = createSolidTex(200, 200, 200);
-    [this.floorTexture, this.floorTextureView] = createSolidTex(120, 120, 120);
+    this.objTexture = objectTexture.texture;
+    this.objTextureView = objectTexture.view;
+    this.floorTexture = floorTexture.texture;
+    this.floorTextureView = floorTexture.view;
 
     this.objSampler = device.createSampler({
       magFilter: 'linear',
@@ -2299,7 +1602,7 @@ export class Renderer {
   async loadObjectTexture(file: File) {
     if (this.objTexture) this.objTexture.destroy();
 
-    const { texture, view } = await this.createTextureFromImageFile(file);
+    const { texture, view } = await createTextureFromImageFile(this.gpu.device, file);
     this.objTexture = texture;
     this.objTextureView = view;
 
@@ -2309,7 +1612,7 @@ export class Renderer {
   async loadFloorTexture(file: File) {
     if (this.floorTexture) this.floorTexture.destroy();
 
-    const { texture, view } = await this.createTextureFromImageFile(file);
+    const { texture, view } = await createTextureFromImageFile(this.gpu.device, file);
     this.floorTexture = texture;
     this.floorTextureView = view;
 
@@ -2615,7 +1918,7 @@ export class Renderer {
         const modelMat = mat4.create();
         mat4.fromTranslation(modelMat, obj.pos);
         mat4.multiply(modelMat, modelMat, rotation);
-        device.queue.writeBuffer(this.uniformBuf, 0, modelMat as any);
+        device.queue.writeBuffer(this.uniformBuf, 0, modelMat as Float32Array);
 
         vsmPass.drawIndexed(mesh.indexCount);
       }
@@ -2729,7 +2032,7 @@ export class Renderer {
           const modelMat = mat4.create();
           mat4.fromTranslation(modelMat, obj.pos);
           mat4.multiply(modelMat, modelMat, rotation);
-          device.queue.writeBuffer(this.uniformBuf, 0, modelMat as any);
+          device.queue.writeBuffer(this.uniformBuf, 0, modelMat as Float32Array);
 
           shadowPass.drawIndexed(mesh.indexCount);
         }
@@ -2776,7 +2079,7 @@ export class Renderer {
       const modelMat = mat4.create();
       mat4.fromTranslation(modelMat, obj.pos);
       mat4.multiply(modelMat, modelMat, rotation);
-      device.queue.writeBuffer(this.uniformBuf, 0, modelMat as any);
+      device.queue.writeBuffer(this.uniformBuf, 0, modelMat as Float32Array);
 
       const objParams = new Float32Array(8);
       objParams[0] = obj.color[0];

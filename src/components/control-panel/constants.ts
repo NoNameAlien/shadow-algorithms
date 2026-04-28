@@ -1,0 +1,86 @@
+import type { ShadowParams } from './types';
+
+export const INITIAL_PARAMS: ShadowParams = {
+  shadowMapSize: 2048,
+  bias: 0.003,
+  method: 'SM',
+  pcfRadius: 2.5,
+  pcfSamples: 8,
+  pcssLightSize: 0.08,
+  pcssBlockerSearchSamples: 8,
+  vsmMinVariance: 0.0001,
+  vsmLightBleedReduction: 0.4,
+  shadowStrength: 1.0
+};
+
+export const SHADOW_METHODS = ['SM', 'PCF', 'PCSS', 'VSM'] as const;
+export const LIGHT_MODES = ['sun', 'spot', 'top'] as const;
+
+export const STRINGS = {
+  en: {
+    title: 'Shadow Controls',
+    methodLabel: 'Method:',
+    lightModeLabel: 'Light Mode',
+    shadowMapSize: 'Shadow Map Size',
+    bias: 'Bias',
+    pcfRadius: 'PCF Radius',
+    pcfSamples: 'PCF Samples',
+    pcssLightSize: 'Light Size',
+    pcssBlockerSamples: 'Blocker Search Samples',
+    vsmMinVariance: 'Min Variance',
+    vsmLightBleed: 'Light Bleed Reduction',
+    shadowStrength: 'Shadow Strength',
+    resetScene: 'Reset Scene',
+    objectTexture: 'Object Texture:',
+    floorTexture: 'Floor Texture:',
+    loadModel: 'Load Model (OBJ):',
+    chooseObj: 'Choose',
+    noModel: 'No model loaded',
+    removeModel: 'Remove model',
+    orbitMode: 'ORBIT MODE (default)',
+    fpsMode: 'FPS MODE (ESC to exit)',
+    fpsLabel: 'FPS',
+    floorShow: 'Show floor',
+    wallsShow: 'Show walls',
+    floorColorLabel: 'Floor color',
+    wallColorLabel: 'Wall color',
+    objectMoveSpeed: 'Object move speed',
+    lightIntensity: 'Light intensity',
+    lightBeamShow: 'Show light beam',
+    lightsLabel: 'Lights',
+    objectsLabel: 'Objects'
+  },
+  ru: {
+    title: 'Настройки теней',
+    methodLabel: 'Метод:',
+    lightModeLabel: 'Тип света',
+    shadowMapSize: 'Размер карты теней',
+    bias: 'Смещение (bias)',
+    pcfRadius: 'Радиус PCF',
+    pcfSamples: 'Сэмплы PCF',
+    pcssLightSize: 'Размер источника',
+    pcssBlockerSamples: 'Сэмплы поиска блокеров',
+    vsmMinVariance: 'Мин. дисперсия',
+    vsmLightBleed: 'Подавление протекания света',
+    shadowStrength: 'Сила теней',
+    resetScene: 'Сброс сцены',
+    objectTexture: 'Текстура объекта:',
+    floorTexture: 'Текстура пола:',
+    loadModel: 'Модель (OBJ):',
+    chooseObj: 'Выбрать',
+    noModel: 'Модель не загружена',
+    removeModel: 'Убрать модель',
+    orbitMode: 'ОРБИТАЛЬНЫЙ РЕЖИМ (по умолчанию)',
+    fpsMode: 'РЕЖИМ FPS (ESC для выхода)',
+    fpsLabel: 'FPS',
+    floorShow: 'Показывать пол',
+    wallsShow: 'Показывать стены',
+    floorColorLabel: 'Цвет пола',
+    wallColorLabel: 'Цвет стен',
+    objectMoveSpeed: 'Скорость перемещения объекта',
+    lightIntensity: 'Яркость света',
+    lightBeamShow: 'Показывать луч источника',
+    lightsLabel: 'Источники света',
+    objectsLabel: 'Объекты'
+  }
+} as const;
