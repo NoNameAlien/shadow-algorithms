@@ -14,9 +14,9 @@ export function ControlPanel({
   onLoadModel,
   onResetScene,
   onResetModel,
+  onLightingPreset,
   onLoadObjectTexture,
   onLoadFloorTexture,
-  fps = 0,
   isPointerLocked = false,
   lightMode,
   onLightModeChange,
@@ -42,6 +42,14 @@ export function ControlPanel({
   onLightColorChange,
   lightCastShadows,
   onLightCastShadowsChange,
+  spotInnerConeDeg,
+  onSpotInnerConeDegChange,
+  spotOuterConeDeg,
+  onSpotOuterConeDegChange,
+  spotRange,
+  onSpotRangeChange,
+  spotFalloff,
+  onSpotFalloffChange,
   lightCount,
   activeLightIndex,
   onSelectLight,
@@ -54,19 +62,26 @@ export function ControlPanel({
   onRemoveObject,
   onSaveScene,
   onLoadSceneFile,
+  onExportCsv,
+  onExportPdf,
+  onExportScreenshot,
   objectColor,
   onObjectColorChange,
   objectCastShadows,
   onObjectCastShadowsChange,
   objectReceiveShadows,
   onObjectReceiveShadowsChange,
+  objectSelfShadows,
+  onObjectSelfShadowsChange,
   meshOptions,
   activeMeshId,
   onObjectMeshChange,
   objectSpecular,
   onObjectSpecularChange,
   objectShininess,
-  onObjectShininessChange
+  onObjectShininessChange,
+  objectRoughness,
+  onObjectRoughnessChange
 }: ControlPanelProps) {
   const [params, setParams] = useState<ShadowParams>(INITIAL_PARAMS);
   const [modelName, setModelName] = useState<string | null>(null);
@@ -104,6 +119,21 @@ export function ControlPanel({
     if (modelInputRef.current) modelInputRef.current.value = '';
   };
 
+  const applyLightingPreset = () => {
+    const presetParams: ShadowParams = {
+      ...INITIAL_PARAMS,
+      method: 'PCF',
+      pcfSamples: 16,
+      ambientStrength: 0.36,
+      exposure: 0.92,
+      hemisphereSkyColor: [0.56, 0.62, 0.76],
+      hemisphereGroundColor: [0.16, 0.14, 0.13]
+    };
+    setParams(presetParams);
+    onParamsChange(presetParams);
+    onLightingPreset?.();
+  };
+
   return (
     <div style={panelStyle}>
       <Header
@@ -128,6 +158,14 @@ export function ControlPanel({
         onLightColorChange={onLightColorChange}
         lightCastShadows={lightCastShadows}
         onLightCastShadowsChange={onLightCastShadowsChange}
+        spotInnerConeDeg={spotInnerConeDeg}
+        onSpotInnerConeDegChange={onSpotInnerConeDegChange}
+        spotOuterConeDeg={spotOuterConeDeg}
+        onSpotOuterConeDegChange={onSpotOuterConeDegChange}
+        spotRange={spotRange}
+        onSpotRangeChange={onSpotRangeChange}
+        spotFalloff={spotFalloff}
+        onSpotFalloffChange={onSpotFalloffChange}
         lightCount={lightCount}
         activeLightIndex={activeLightIndex}
         onSelectLight={onSelectLight}
@@ -149,6 +187,8 @@ export function ControlPanel({
         onObjectCastShadowsChange={onObjectCastShadowsChange}
         objectReceiveShadows={objectReceiveShadows}
         onObjectReceiveShadowsChange={onObjectReceiveShadowsChange}
+        objectSelfShadows={objectSelfShadows}
+        onObjectSelfShadowsChange={onObjectSelfShadowsChange}
         meshOptions={meshOptions}
         activeMeshId={activeMeshId}
         onObjectMeshChange={onObjectMeshChange}
@@ -156,6 +196,8 @@ export function ControlPanel({
         onObjectSpecularChange={onObjectSpecularChange}
         objectShininess={objectShininess}
         onObjectShininessChange={onObjectShininessChange}
+        objectRoughness={objectRoughness}
+        onObjectRoughnessChange={onObjectRoughnessChange}
         objectMoveSpeed={objectMoveSpeed}
         onObjectMoveSpeedChange={onObjectMoveSpeedChange}
       />
@@ -185,7 +227,29 @@ export function ControlPanel({
         onLoadFloorTexture={onLoadFloorTexture}
         onSaveScene={onSaveScene}
         onLoadSceneFile={onLoadSceneFile}
+        onExportCsv={onExportCsv}
+        onExportPdf={onExportPdf}
+        onExportScreenshot={onExportScreenshot}
       />
+
+      <button
+        type="button"
+        onClick={applyLightingPreset}
+        style={{
+          width: '100%',
+          padding: 8,
+          marginBottom: 8,
+          background: '#2f9e44',
+          color: '#fff',
+          border: 'none',
+          borderRadius: 6,
+          cursor: 'pointer',
+          fontSize: 14,
+          fontWeight: 600
+        }}
+      >
+        {lang === 'ru' ? 'Пресет света' : 'Lighting preset'}
+      </button>
 
       <button
         type="button"
@@ -211,7 +275,6 @@ export function ControlPanel({
         strings={strings}
         showHints={showHints}
         isPointerLocked={isPointerLocked}
-        fps={fps}
         onToggleHints={() => setShowHints((previous) => !previous)}
       />
     </div>

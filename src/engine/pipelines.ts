@@ -11,6 +11,8 @@ export type RendererPipelines = {
   gridPipeline: GPURenderPipeline;
   lightBeamPipeline: GPURenderPipeline;
   axisPipeline: GPURenderPipeline;
+  debugShadowDepthPipeline: GPURenderPipeline;
+  debugVsmPipeline: GPURenderPipeline;
 };
 
 export function createRendererPipelines(device: GPUDevice, format: GPUTextureFormat): RendererPipelines {
@@ -145,6 +147,36 @@ export function createRendererPipelines(device: GPUDevice, format: GPUTextureFor
   });
   console.log('✓ Light beam pipeline created');
 
+  const debugShadowDepthModule = device.createShaderModule({ code: shaders.debugShadowDepth });
+  const debugShadowDepthPipeline = device.createRenderPipeline({
+    label: 'debug shadow depth color pipeline',
+    layout: 'auto',
+    vertex: { module: debugShadowDepthModule, entryPoint: 'vs_main', buffers: [posLayout] },
+    fragment: { module: debugShadowDepthModule, entryPoint: 'fs_main', targets: [{ format: 'rgba8unorm' }] },
+    primitive: { topology: 'triangle-list', cullMode: 'back' }
+  });
+  console.log('✓ Debug shadow depth pipeline created');
+
+  const debugVsmModule = device.createShaderModule({ code: shaders.debugVsm });
+  const debugVsmPipeline = device.createRenderPipeline({
+    label: 'debug shadow map overlay pipeline',
+    layout: 'auto',
+    vertex: { module: debugVsmModule, entryPoint: 'vs_main' },
+    fragment: {
+      module: debugVsmModule,
+      entryPoint: 'fs_main',
+      targets: [{
+        format,
+        blend: {
+          color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+          alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }
+        }
+      }]
+    },
+    primitive: { topology: 'triangle-list', cullMode: 'none' }
+  });
+  console.log('✓ Debug VSM pipeline created');
+
   return {
     pipelineSM,
     pipelinePCF,
@@ -155,6 +187,8 @@ export function createRendererPipelines(device: GPUDevice, format: GPUTextureFor
     shadowPipeline,
     gridPipeline,
     lightBeamPipeline,
-    axisPipeline
+    axisPipeline,
+    debugShadowDepthPipeline,
+    debugVsmPipeline
   };
 }

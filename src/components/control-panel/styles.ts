@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 export const panelStyle: CSSProperties = {
   position: 'absolute',
   top: 12,
-  right: 12,
+  right: 56,
   background: '#181b20',
   padding: 14,
   borderRadius: 10,
@@ -59,9 +59,12 @@ export const fileButtonStyle: CSSProperties = {
 };
 
 export const colorInputStyle: CSSProperties = {
-  width: 32,
-  height: 20,
-  padding: 0,
-  border: 'none',
+  width: 44,
+  height: 26,
+  padding: 1,
+  border: '1px solid #343b4a',
+  borderRadius: 4,
+  background: '#252a34',
+  flexShrink: 0,
   cursor: 'pointer'
 };

@@ -5,11 +5,10 @@ type Props = {
   strings: ControlPanelStrings;
   showHints: boolean;
   isPointerLocked: boolean;
-  fps: number;
   onToggleHints: () => void;
 };
 
-export function HintsSection({ lang, strings, showHints, isPointerLocked, fps, onToggleHints }: Props) {
+export function HintsSection({ lang, strings, showHints, isPointerLocked, onToggleHints }: Props) {
   return (
     <>
       <button
@@ -70,18 +69,6 @@ export function HintsSection({ lang, strings, showHints, isPointerLocked, fps, o
         </div>
       )}
 
-      <div
-        style={{
-          marginTop: 6,
-          paddingTop: 6,
-          borderTop: '1px solid #262a32',
-          fontSize: 13,
-          opacity: 0.7,
-          textAlign: 'right'
-        }}
-      >
-        {strings.fpsLabel}: {Math.min(120, fps)}
-      </div>
     </>
   );
 }

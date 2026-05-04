@@ -164,7 +164,7 @@ export function createUniformBuffers(device: GPUDevice): UniformBuffers {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     shadingBuf: device.createBuffer({
-      size: 32,
+      size: 96,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     gridParamsBuf: device.createBuffer({
@@ -180,7 +180,7 @@ export function createUniformBuffers(device: GPUDevice): UniformBuffers {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     lightsBuf: device.createBuffer({
-      size: 352,
+      size: 480,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     })
   };

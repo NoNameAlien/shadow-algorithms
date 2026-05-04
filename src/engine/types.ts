@@ -10,6 +10,22 @@ export type GPUCtx = {
 export type Selection = 'none' | 'object' | 'light';
 export type ShadowMethod = 'SM' | 'PCF' | 'PCSS' | 'VSM';
 export type LightMode = 'sun' | 'spot' | 'top';
+export type ShadowDebugMode = 'off' | 'primary' | 'secondary';
+export type LightDebugMode = 'final' | 'lighting' | 'diffuse' | 'specular' | 'shadow' | 'normals';
+
+export type PerformanceMetrics = {
+  fps: number;
+  averageFps: number;
+  recentMinFps: number;
+  recentMaxFps: number;
+  sessionMinFps: number;
+  sessionMaxFps: number;
+  frameTimeMs: number;
+  averageFrameTimeMs: number;
+  maxFrameTimeMs: number;
+  frameTimeHistory: number[];
+  sampleDurationMs: number;
+};
 
 export type LightDef = {
   pos: vec3;
@@ -19,6 +35,10 @@ export type LightDef = {
   intensity: number;
   color: vec3;
   castShadows: boolean;
+  innerConeDeg: number;
+  outerConeDeg: number;
+  range: number;
+  falloff: number;
 };
 
 export type SceneObject = {
@@ -28,9 +48,11 @@ export type SceneObject = {
   color: vec3;
   castShadows: boolean;
   receiveShadows: boolean;
+  selfShadows: boolean;
   meshId: number;
   specular: number;
   shininess: number;
+  roughness: number;
 };
 
 export type MeshDef = {
@@ -51,6 +73,10 @@ export type LightDTO = {
   intensity: number;
   color: [number, number, number];
   castShadows: boolean;
+  innerConeDeg?: number;
+  outerConeDeg?: number;
+  range?: number;
+  falloff?: number;
 };
 
 export type ObjectDTO = {
@@ -59,9 +85,11 @@ export type ObjectDTO = {
   color: [number, number, number];
   castShadows: boolean;
   receiveShadows: boolean;
+  selfShadows?: boolean;
   meshId: number;
   specular: number;
   shininess: number;
+  roughness?: number;
 };
 
 export type ShadowParamsDTO = {
@@ -75,6 +103,12 @@ export type ShadowParamsDTO = {
   vsmMinVariance: number;
   vsmLightBleedReduction: number;
   shadowStrength: number;
+  ambientStrength: number;
+  exposure: number;
+  hemisphereSkyColor?: [number, number, number];
+  hemisphereGroundColor?: [number, number, number];
+  lightDebugMode: LightDebugMode;
+  debugShadowMap: ShadowDebugMode;
 };
 
 export type SceneDTO = {

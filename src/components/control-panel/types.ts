@@ -1,6 +1,12 @@
+import type { PerformanceMetrics } from '../../engine/types';
+
+export type { PerformanceMetrics };
+
 export type Lang = 'en' | 'ru';
 export type LightMode = 'sun' | 'spot' | 'top';
 export type ShadowMethod = 'SM' | 'PCF' | 'PCSS' | 'VSM';
+export type ShadowDebugMode = 'off' | 'primary' | 'secondary';
+export type LightDebugMode = 'final' | 'lighting' | 'diffuse' | 'specular' | 'shadow' | 'normals';
 
 export type ShadowParams = {
   shadowMapSize: number;
@@ -13,6 +19,12 @@ export type ShadowParams = {
   vsmMinVariance?: number;
   vsmLightBleedReduction?: number;
   shadowStrength?: number;
+  ambientStrength?: number;
+  exposure?: number;
+  hemisphereSkyColor?: [number, number, number];
+  hemisphereGroundColor?: [number, number, number];
+  lightDebugMode?: LightDebugMode;
+  debugShadowMap?: ShadowDebugMode;
 };
 
 export type MeshOption = { id: number; name: string };
@@ -23,7 +35,7 @@ export type ControlPanelProps = {
   onLoadModel: (file: File) => void;
   onResetScene?: () => void;
   onResetModel?: () => void;
-  fps?: number;
+  onLightingPreset?: () => void;
   isPointerLocked?: boolean;
   lightMode: LightMode;
   onLightModeChange: (mode: LightMode) => void;
@@ -61,14 +73,27 @@ export type ControlPanelProps = {
   onRemoveObject: () => void;
   onSaveScene?: () => void;
   onLoadSceneFile?: (file: File) => void;
+  onExportCsv?: () => void;
+  onExportPdf?: () => void;
+  onExportScreenshot?: () => void;
   objectColor: string;
   onObjectColorChange: (hex: string) => void;
   objectCastShadows: boolean;
   onObjectCastShadowsChange: (value: boolean) => void;
   objectReceiveShadows: boolean;
   onObjectReceiveShadowsChange: (value: boolean) => void;
+  objectSelfShadows: boolean;
+  onObjectSelfShadowsChange: (value: boolean) => void;
   lightCastShadows: boolean;
   onLightCastShadowsChange: (value: boolean) => void;
+  spotInnerConeDeg: number;
+  onSpotInnerConeDegChange: (value: number) => void;
+  spotOuterConeDeg: number;
+  onSpotOuterConeDegChange: (value: number) => void;
+  spotRange: number;
+  onSpotRangeChange: (value: number) => void;
+  spotFalloff: number;
+  onSpotFalloffChange: (value: number) => void;
   meshOptions: MeshOption[];
   activeMeshId: number;
   onObjectMeshChange: (meshId: number) => void;
@@ -76,4 +101,6 @@ export type ControlPanelProps = {
   onObjectSpecularChange: (value: number) => void;
   objectShininess: number;
   onObjectShininessChange: (value: number) => void;
+  objectRoughness: number;
+  onObjectRoughnessChange: (value: number) => void;
 };

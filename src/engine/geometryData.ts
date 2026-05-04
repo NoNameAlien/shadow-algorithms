@@ -52,6 +52,88 @@ export function createCubeGeometry(): MeshGeometry {
   };
 }
 
+export function createBeveledCubeGeometry(radius = 0.22, segments = 8): MeshGeometry {
+  const half = 1.0;
+  const inner = half - radius;
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  const pushVertex = (rawX: number, rawY: number, rawZ: number, faceNormal: [number, number, number], u: number, v: number) => {
+    const cx = Math.max(-inner, Math.min(inner, rawX));
+    const cy = Math.max(-inner, Math.min(inner, rawY));
+    const cz = Math.max(-inner, Math.min(inner, rawZ));
+    const ox = rawX - cx;
+    const oy = rawY - cy;
+    const oz = rawZ - cz;
+    const len = Math.hypot(ox, oy, oz);
+    const nx = len > 1e-5 ? ox / len : faceNormal[0];
+    const ny = len > 1e-5 ? oy / len : faceNormal[1];
+    const nz = len > 1e-5 ? oz / len : faceNormal[2];
+
+    positions.push(cx + nx * radius, cy + ny * radius, cz + nz * radius);
+    normals.push(nx, ny, nz);
+    uvs.push(u, v);
+  };
+
+  const addFace = (
+    axis: 'x' | 'y' | 'z',
+    sign: -1 | 1,
+    uAxis: 'x' | 'y' | 'z',
+    vAxis: 'x' | 'y' | 'z',
+    flip: boolean
+  ) => {
+    const base = positions.length / 3;
+    const faceNormal: [number, number, number] = [
+      axis === 'x' ? sign : 0,
+      axis === 'y' ? sign : 0,
+      axis === 'z' ? sign : 0
+    ];
+
+    for (let y = 0; y <= segments; y++) {
+      for (let x = 0; x <= segments; x++) {
+        const fu = x / segments;
+        const fv = y / segments;
+        const coord = { x: 0, y: 0, z: 0 };
+        coord[axis] = sign * half;
+        coord[uAxis] = -half + fu * half * 2;
+        coord[vAxis] = -half + fv * half * 2;
+        pushVertex(coord.x, coord.y, coord.z, faceNormal, fu, fv);
+      }
+    }
+
+    const stride = segments + 1;
+    for (let y = 0; y < segments; y++) {
+      for (let x = 0; x < segments; x++) {
+        const i0 = base + y * stride + x;
+        const i1 = i0 + 1;
+        const i2 = i0 + stride;
+        const i3 = i2 + 1;
+        if (flip) {
+          indices.push(i0, i2, i1, i1, i2, i3);
+        } else {
+          indices.push(i0, i1, i2, i1, i3, i2);
+        }
+      }
+    }
+  };
+
+  addFace('z', 1, 'x', 'y', false);
+  addFace('z', -1, 'x', 'y', true);
+  addFace('x', 1, 'z', 'y', true);
+  addFace('x', -1, 'z', 'y', false);
+  addFace('y', 1, 'x', 'z', true);
+  addFace('y', -1, 'x', 'z', false);
+
+  return {
+    positions: new Float32Array(positions),
+    normals: new Float32Array(normals),
+    uvs: new Float32Array(uvs),
+    indices: new Uint16Array(indices)
+  };
+}
+
 export function createGridGeometry(): Omit<MeshGeometry, 'indices'> {
   return {
     positions: new Float32Array([

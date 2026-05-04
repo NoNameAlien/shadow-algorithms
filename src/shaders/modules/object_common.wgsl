@@ -25,7 +25,7 @@ struct Uniforms {
 
 struct ObjectParams {
   base: vec4<f32>, // xyz: color, w: receiveShadows
-  spec: vec4<f32>, // x: specStrength, y: shininess
+  spec: vec4<f32>, // x: specStrength, y: shininess, z: selfShadows, w: roughness
 };
 
 struct ShadowMatrices {

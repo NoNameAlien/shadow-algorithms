@@ -24,7 +24,11 @@ export function createDefaultLights(params: {
       pitch: params.spotPitch,
       intensity: params.lightIntensity,
       color: vec3.fromValues(1.0, 1.0, 1.0),
-      castShadows: true
+      castShadows: true,
+      innerConeDeg: 15,
+      outerConeDeg: 25,
+      range: 14,
+      falloff: 1.6
     },
     {
       pos: vec3.fromValues(-6, 8, -4),
@@ -33,7 +37,11 @@ export function createDefaultLights(params: {
       pitch: -0.6,
       intensity: 0.7,
       color: vec3.fromValues(1.0, 0.9, 0.7),
-      castShadows: false
+      castShadows: false,
+      innerConeDeg: 18,
+      outerConeDeg: 34,
+      range: 12,
+      falloff: 1.4
     }
   ];
 }
@@ -46,10 +54,12 @@ export function createDefaultObjects(defaultMeshId: number): SceneObject[] {
       moveSpeed: 1.0,
       color: vec3.fromValues(1.0, 1.0, 1.0),
       castShadows: true,
-      receiveShadows: true,
+      receiveShadows: false,
+      selfShadows: false,
       meshId: defaultMeshId,
       specular: 0.5,
-      shininess: 32.0
+      shininess: 32.0,
+      roughness: 0.45
     }
   ];
 }
@@ -69,7 +79,11 @@ export function createLight(params: {
     pitch: params.def?.pitch ?? -0.6,
     intensity: params.def?.intensity ?? 1.0,
     color: params.def?.color ? vec3.clone(params.def.color) : vec3.fromValues(1.0, 1.0, 1.0),
-    castShadows: params.def?.castShadows ?? false
+    castShadows: params.def?.castShadows ?? false,
+    innerConeDeg: params.def?.innerConeDeg ?? 15,
+    outerConeDeg: params.def?.outerConeDeg ?? 28,
+    range: params.def?.range ?? 12,
+    falloff: params.def?.falloff ?? 1.5
   };
 }
 
@@ -90,10 +104,12 @@ export function createSceneObject(params: {
     moveSpeed: params.def?.moveSpeed ?? params.objectMoveSpeed,
     color: params.def?.color ? vec3.clone(params.def.color) : vec3.fromValues(1.0, 1.0, 1.0),
     castShadows: params.def?.castShadows ?? true,
-    receiveShadows: params.def?.receiveShadows ?? true,
+    receiveShadows: params.def?.receiveShadows ?? false,
+    selfShadows: params.def?.selfShadows ?? false,
     meshId: params.def?.meshId ?? params.defaultMeshId,
     specular: params.def?.specular ?? 0.5,
-    shininess: params.def?.shininess ?? 32.0
+    shininess: params.def?.shininess ?? 32.0,
+    roughness: params.def?.roughness ?? 0.45
   };
 }
 
@@ -105,7 +121,11 @@ export function lightsToDTO(lights: LightDef[]): LightDTO[] {
     pitch: light.pitch,
     intensity: light.intensity,
     color: [light.color[0], light.color[1], light.color[2]],
-    castShadows: light.castShadows
+    castShadows: light.castShadows,
+    innerConeDeg: light.innerConeDeg,
+    outerConeDeg: light.outerConeDeg,
+    range: light.range,
+    falloff: light.falloff
   }));
 }
 
@@ -116,9 +136,11 @@ export function objectsToDTO(objects: SceneObject[], defaultMeshId: number): Obj
     color: [object.color[0], object.color[1], object.color[2]],
     castShadows: object.castShadows,
     receiveShadows: object.receiveShadows,
+    selfShadows: object.selfShadows,
     meshId: object.meshId ?? defaultMeshId,
     specular: object.specular,
-    shininess: object.shininess
+    shininess: object.shininess,
+    roughness: object.roughness
   }));
 }
 
@@ -134,7 +156,11 @@ export function lightsFromDTO(lights: LightDTO[]): LightDef[] {
       light.color?.[1] ?? 1.0,
       light.color?.[2] ?? 1.0
     ),
-    castShadows: light.castShadows ?? false
+    castShadows: light.castShadows ?? false,
+    innerConeDeg: light.innerConeDeg ?? 15,
+    outerConeDeg: light.outerConeDeg ?? 28,
+    range: light.range ?? 12,
+    falloff: light.falloff ?? 1.5
   }));
 }
 
@@ -149,10 +175,12 @@ export function objectsFromDTO(objects: ObjectDTO[], defaultMeshId: number): Sce
       object.color?.[2] ?? 1.0
     ),
     castShadows: object.castShadows ?? true,
-    receiveShadows: object.receiveShadows ?? true,
+    receiveShadows: object.receiveShadows ?? false,
+    selfShadows: object.selfShadows ?? false,
     meshId: object.meshId ?? defaultMeshId,
     specular: object.specular ?? 0.5,
-    shininess: object.shininess ?? 32.0
+    shininess: object.shininess ?? 32.0,
+    roughness: object.roughness ?? 0.45
   }));
 }
 

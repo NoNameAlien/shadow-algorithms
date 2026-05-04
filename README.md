@@ -1,4 +1,3 @@
-
 # Shadow Algorithms Lab (WebGPU)
 
 <!-- ![Project Preview](docs/images/preview.png) -->
@@ -10,11 +9,13 @@
 ## 🛠️ Технический стек
 
 ### Frontend
+
 - **React 18** — UI компоненты
 - **TypeScript 5.2** — типобезопасность
 - **Vite** — быстрая сборка и HMR
 
 ### Graphics
+
 - **WebGPU** — современный GPU API
 - **WGSL** — шейдерный язык
 - **gl-matrix** — линейная алгебра
@@ -32,6 +33,7 @@
 ## 🎮 Управление
 
 ### Orbit Mode (по умолчанию)
+
 - **Drag объект** — вращение объекта
 - **Shift + Drag** — перемещение света
 - **WASD/Стрелочки** — orbit камеры
@@ -39,6 +41,7 @@
 - **Ctrl + Click** — войти в FPS режим
 
 ### FPS Mode
+
 - **WASD** — движение камеры
 - **Мышь** — взгляд
 - **Пробел** — вверх
@@ -48,6 +51,7 @@
 ## 🚀 Быстрый старт
 
 ### Требования
+
 - Node.js 18+ (рекомендуется 20+)
 - Браузер с поддержкой WebGPU (Chrome/Edge 113+)
 - **Linux:** включите флаги в `chrome://flags`
@@ -56,19 +60,23 @@
   - Перезапустите браузер
 
 ### Установка
+
 ```bash
 npm install
 npm run dev
 ```
+
 Откройте http://localhost:5173
 
 ### Сборка
+
 ```bash
 npm run build
 npm run preview
 ```
 
 ## 📁 Структура проекта
+
 ```
 src/
 ├── components/
@@ -99,28 +107,37 @@ src/
 ## 🔬 Реализованные методы
 
 ### 1. Shadow Mapping (SM)
+
 Классический алгоритм — жёсткие тени с чёткими краями.
+
 - ⚡ Самый быстрый
 - ⚠️ Алиасинг на краях
 
 ### 2. Percentage Closer Filtering (PCF)
+
 Фильтрация — мягкие края через усреднение соседних texel.
+
 - ✨ Сглаженные края
 - 🎯 Настраиваемый радиус
 
 ### 3. Percentage Closer Soft Shadows (PCSS)
+
 Динамические мягкие тени — размер полутени зависит от расстояния.
+
 - 🌟 Реалистичные мягкие тени
 - 📐 Пенумбра меняется с расстоянием
 
 ### 4. Variance Shadow Maps (VSM)
+
 Предфильтрованные тени — хранение моментов глубины.
+
 - 🚀 Быстрая фильтрация (compute shader)
 - ⚠️ Light bleeding на тонких объектах
 
 ## 🛠️ Дорожная карта
 
 ### Готово ✅
+
 - [x] Базовый рендер (куб, Lambert освещение)
 - [x] Shadow Mapping
 - [x] PCF фильтрация
@@ -131,23 +148,26 @@ src/
 - [x] Перемещаемый источник света
 
 ### В разработке 🚧
-- [ ] Метрики производительности (FPS timeline, frame time)
-- [ ] Визуализация Shadow Map (debug mode)
+
+- [x] Метрики производительности (FPS timeline, frame time)
+- [x] Визуализация Shadow Map (debug mode)
 - [ ] Preset сцены (Forest, Stairs, Multiple Objects)
 - [ ] Экспорт отчётов (PDF, CSV, скриншоты)
-- [ ] Cascaded Shadow Maps (CSM)
 
 ## 🐛 Частые проблемы
 
 **❌ "Failed to request GPU adapter"**
+
 - Проверьте `chrome://gpu` (WebGPU должен быть Hardware accelerated)
 - Включите флаги WebGPU/Vulkan
 - Обновите драйверы GPU
 
 **❌ Низкий FPS**
+
 - Уменьшите Shadow Map Size до 1024
 - Уменьшите PCF Samples до 8
 
 **❌ OBJ модель без теней**
+
 - Убедитесь что у модели есть нормали (`vn` в файле)
 - Модель должна быть над плоскостью (Y > -2.5)

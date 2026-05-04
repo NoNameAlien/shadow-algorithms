@@ -1,6 +1,8 @@
 import axisGizmoWGSL from '../shaders/axis_gizmo.wgsl?raw';
 import basicWGSL from '../shaders/basic.wgsl?raw';
 import depthWGSL from '../shaders/depth.wgsl?raw';
+import debugShadowDepthWGSL from '../shaders/debug_shadow_depth.wgsl?raw';
+import debugVsmWGSL from '../shaders/debug_vsm.wgsl?raw';
 import gridSolidWGSL from '../shaders/grid_solid.wgsl?raw';
 import lightBeamWGSL from '../shaders/light_beam.wgsl?raw';
 import lightingCommonWGSL from '../shaders/modules/lighting_common.wgsl?raw';
@@ -41,6 +43,8 @@ export const shaders = {
   axisGizmo: axisGizmoWGSL,
   basic: resolveIncludes(basicWGSL),
   depth: depthWGSL,
+  debugShadowDepth: debugShadowDepthWGSL,
+  debugVsm: debugVsmWGSL,
   gridSolid: resolveIncludes(gridSolidWGSL),
   lightBeam: lightBeamWGSL,
   pcf: resolveIncludes(pcfWGSL),

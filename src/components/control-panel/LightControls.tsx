@@ -14,6 +14,14 @@ type Props = Pick<
   | 'onLightColorChange'
   | 'lightCastShadows'
   | 'onLightCastShadowsChange'
+  | 'spotInnerConeDeg'
+  | 'onSpotInnerConeDegChange'
+  | 'spotOuterConeDeg'
+  | 'onSpotOuterConeDegChange'
+  | 'spotRange'
+  | 'onSpotRangeChange'
+  | 'spotFalloff'
+  | 'onSpotFalloffChange'
   | 'lightCount'
   | 'activeLightIndex'
   | 'onSelectLight'
@@ -37,6 +45,14 @@ export function LightControls({
   onLightColorChange,
   lightCastShadows,
   onLightCastShadowsChange,
+  spotInnerConeDeg,
+  onSpotInnerConeDegChange,
+  spotOuterConeDeg,
+  onSpotOuterConeDegChange,
+  spotRange,
+  onSpotRangeChange,
+  spotFalloff,
+  onSpotFalloffChange,
   lightCount,
   activeLightIndex,
   onSelectLight,
@@ -67,10 +83,18 @@ export function LightControls({
         lightColor={lightColor}
         lightCastShadows={lightCastShadows}
         showLightBeam={showLightBeam}
+        spotInnerConeDeg={spotInnerConeDeg}
+        spotOuterConeDeg={spotOuterConeDeg}
+        spotRange={spotRange}
+        spotFalloff={spotFalloff}
         onLightIntensityChange={onLightIntensityChange}
         onLightColorChange={onLightColorChange}
         onLightCastShadowsChange={onLightCastShadowsChange}
         onShowLightBeamChange={onShowLightBeamChange}
+        onSpotInnerConeDegChange={onSpotInnerConeDegChange}
+        onSpotOuterConeDegChange={onSpotOuterConeDegChange}
+        onSpotRangeChange={onSpotRangeChange}
+        onSpotFalloffChange={onSpotFalloffChange}
       />
     </>
   );

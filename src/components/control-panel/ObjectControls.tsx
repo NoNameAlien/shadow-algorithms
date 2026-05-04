@@ -16,6 +16,8 @@ type Props = Pick<
   | 'onObjectCastShadowsChange'
   | 'objectReceiveShadows'
   | 'onObjectReceiveShadowsChange'
+  | 'objectSelfShadows'
+  | 'onObjectSelfShadowsChange'
   | 'meshOptions'
   | 'activeMeshId'
   | 'onObjectMeshChange'
@@ -23,6 +25,8 @@ type Props = Pick<
   | 'onObjectSpecularChange'
   | 'objectShininess'
   | 'onObjectShininessChange'
+  | 'objectRoughness'
+  | 'onObjectRoughnessChange'
   | 'objectMoveSpeed'
   | 'onObjectMoveSpeedChange'
 > & {
@@ -44,6 +48,8 @@ export function ObjectControls({
   onObjectCastShadowsChange,
   objectReceiveShadows,
   onObjectReceiveShadowsChange,
+  objectSelfShadows,
+  onObjectSelfShadowsChange,
   meshOptions,
   activeMeshId,
   onObjectMeshChange,
@@ -51,6 +57,8 @@ export function ObjectControls({
   onObjectSpecularChange,
   objectShininess,
   onObjectShininessChange,
+  objectRoughness,
+  onObjectRoughnessChange,
   objectMoveSpeed,
   onObjectMoveSpeedChange
 }: Props) {
@@ -76,14 +84,18 @@ export function ObjectControls({
         activeMeshId={activeMeshId}
         objectSpecular={objectSpecular}
         objectShininess={objectShininess}
+        objectRoughness={objectRoughness}
         objectCastShadows={objectCastShadows}
         objectReceiveShadows={objectReceiveShadows}
+        objectSelfShadows={objectSelfShadows}
         onObjectColorChange={onObjectColorChange}
         onObjectMeshChange={onObjectMeshChange}
         onObjectSpecularChange={onObjectSpecularChange}
         onObjectShininessChange={onObjectShininessChange}
+        onObjectRoughnessChange={onObjectRoughnessChange}
         onObjectCastShadowsChange={onObjectCastShadowsChange}
         onObjectReceiveShadowsChange={onObjectReceiveShadowsChange}
+        onObjectSelfShadowsChange={onObjectSelfShadowsChange}
       />
 
       <ObjectMoveSpeedSection

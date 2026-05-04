@@ -10,7 +10,13 @@ export const INITIAL_PARAMS: ShadowParams = {
   pcssBlockerSearchSamples: 8,
   vsmMinVariance: 0.0001,
   vsmLightBleedReduction: 0.4,
-  shadowStrength: 1.0
+  shadowStrength: 1.0,
+  ambientStrength: 0.4,
+  exposure: 0.9,
+  hemisphereSkyColor: [0.62, 0.68, 0.78],
+  hemisphereGroundColor: [0.18, 0.16, 0.14],
+  lightDebugMode: 'final',
+  debugShadowMap: 'off'
 };
 
 export const SHADOW_METHODS = ['SM', 'PCF', 'PCSS', 'VSM'] as const;
@@ -30,6 +36,13 @@ export const STRINGS = {
     vsmMinVariance: 'Min Variance',
     vsmLightBleed: 'Light Bleed Reduction',
     shadowStrength: 'Shadow Strength',
+    ambientStrength: 'Ambient',
+    exposure: 'Exposure',
+    lightDebugMode: 'Light Debug View',
+    skyAmbient: 'Sky ambient',
+    groundAmbient: 'Ground ambient',
+    qualityPreset: 'Quality preset',
+    shadowDebug: 'Shadow Map Debug',
     resetScene: 'Reset Scene',
     objectTexture: 'Object Texture:',
     floorTexture: 'Floor Texture:',
@@ -46,7 +59,7 @@ export const STRINGS = {
     wallColorLabel: 'Wall color',
     objectMoveSpeed: 'Object move speed',
     lightIntensity: 'Light intensity',
-    lightBeamShow: 'Show light beam',
+    lightBeamShow: 'Show light direction',
     lightsLabel: 'Lights',
     objectsLabel: 'Objects'
   },
@@ -63,6 +76,13 @@ export const STRINGS = {
     vsmMinVariance: 'Мин. дисперсия',
     vsmLightBleed: 'Подавление протекания света',
     shadowStrength: 'Сила теней',
+    ambientStrength: 'Фоновый свет',
+    exposure: 'Экспозиция',
+    lightDebugMode: 'Диагностика света',
+    skyAmbient: 'Верхний ambient',
+    groundAmbient: 'Нижний ambient',
+    qualityPreset: 'Пресет качества',
+    shadowDebug: 'Отладка карты теней',
     resetScene: 'Сброс сцены',
     objectTexture: 'Текстура объекта:',
     floorTexture: 'Текстура пола:',
@@ -79,7 +99,7 @@ export const STRINGS = {
     wallColorLabel: 'Цвет стен',
     objectMoveSpeed: 'Скорость перемещения объекта',
     lightIntensity: 'Яркость света',
-    lightBeamShow: 'Показывать луч источника',
+    lightBeamShow: 'Показывать направление света',
     lightsLabel: 'Источники света',
     objectsLabel: 'Объекты'
   }

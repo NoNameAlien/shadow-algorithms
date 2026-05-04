@@ -111,18 +111,24 @@ fn computeLightContributionFloor(
   light: Light,
   isShadowed: bool,
   lightSpacePos: vec4<f32>
-) -> f32 {
+) -> LightContribution {
   let L = computeLightDirection(light, worldPos);
-  let lambert = max(dot(N, L), 0.0) * computeSpotFactor(light, worldPos);
+  let lambert = max(dot(N, L), 0.0) * computeSpotFactor(light, worldPos) * computeDistanceFalloff(light, worldPos);
 
   var vis: f32 = 1.0;
   if (isShadowed) {
-    let rawVisibility = shadowVisibilityFloor(lightSpacePos);
+    let biasedWorldPos = worldPos + N * receiverNormalBias(N, L, u.shadowParams);
+    let biasedLightSpacePos = u.lightViewProj * vec4<f32>(biasedWorldPos, 1.0);
+    let rawVisibility = shadowVisibilityFloor(biasedLightSpacePos);
     vis = mixShadowStrength(rawVisibility, shading.shadowStrength);
   }
 
   let intensity = max(light.intensity, 0.0);
-  return lambert * vis * intensity;
+  return LightContribution(
+    light.color * (lambert * vis * intensity),
+    vec3<f32>(0.0),
+    vis
+  );
 }
 
 @fragment
@@ -152,10 +158,11 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
 
   let N = normalize(input.worldN);
   let worldPos = input.worldPos;
-  let ambient = 0.4;
+  let ambient = computeHemisphereAmbient(N, shading);
 
   let lightCount = i32(round(lightsData.count));
   var diffuseSum: vec3<f32> = vec3<f32>(0.0);
+  var visibilitySum: f32 = 0.0;
   let caster = i32(round(shading.shadowCaster0));
 
   for (var i = 0; i < lightCount; i = i + 1) {
@@ -169,11 +176,32 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
       isShadowed,
       input.lightSpacePos
     );
-    diffuseSum = diffuseSum + contrib * light.color;
+    diffuseSum = diffuseSum + contrib.diffuse;
+    visibilitySum = visibilitySum + contrib.visibility;
   }
 
-  let diffuse = (1.0 - ambient) * diffuseSum;
-  let lighting = clamp(ambient + diffuse, vec3<f32>(0.0), vec3<f32>(1.0));
-  let finalColor = baseColor * lighting;
+  let diffuse = diffuseSum;
+  let exposure = max(shading.exposure, 0.0);
+  let debugMode = lightDebugModeIndex(shading);
+  let lightCountF = max(f32(lightCount), 1.0);
+
+  if (debugMode == LIGHT_DEBUG_LIGHTING) {
+    return vec4<f32>(toneMap((ambient + diffuse) * exposure), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_DIFFUSE) {
+    return vec4<f32>(toneMap(diffuseSum * exposure), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_SPECULAR) {
+    return vec4<f32>(vec3<f32>(0.0), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_SHADOW) {
+    let shadowMask = clamp(visibilitySum / lightCountF, 0.0, 1.0);
+    return vec4<f32>(vec3<f32>(shadowMask), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_NORMALS) {
+    return vec4<f32>(N * 0.5 + vec3<f32>(0.5), 1.0);
+  }
+
+  let finalColor = toneMap(baseColor * (ambient + diffuse) * exposure);
   return vec4<f32>(finalColor, 1.0);
 }

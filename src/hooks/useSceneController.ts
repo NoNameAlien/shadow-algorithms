@@ -14,9 +14,11 @@ type ObjectPanelState = {
   color: string;
   castShadows: boolean;
   receiveShadows: boolean;
+  selfShadows: boolean;
   meshId: number;
   specular: number;
   shininess: number;
+  roughness: number;
 };
 
 type LightPanelState = {
@@ -24,22 +26,32 @@ type LightPanelState = {
   intensity: number;
   color: string;
   castShadows: boolean;
+  innerConeDeg: number;
+  outerConeDeg: number;
+  range: number;
+  falloff: number;
 };
 
 const DEFAULT_LIGHT_STATE: LightPanelState = {
   mode: 'sun',
   intensity: 1.0,
   color: '#ffffff',
-  castShadows: true
+  castShadows: true,
+  innerConeDeg: 15,
+  outerConeDeg: 28,
+  range: 12,
+  falloff: 1.5
 };
 
 const DEFAULT_OBJECT_STATE: ObjectPanelState = {
   color: '#ffffff',
   castShadows: true,
-  receiveShadows: true,
+  receiveShadows: false,
+  selfShadows: false,
   meshId: 0,
   specular: 0.5,
-  shininess: 32
+  shininess: 32,
+  roughness: 0.45
 };
 
 const DEFAULT_META: EntityMeta = { count: 1, activeIndex: 0 };
@@ -68,15 +80,21 @@ const sameObjectState = (left: ObjectPanelState, right: ObjectPanelState) =>
   left.color === right.color &&
   left.castShadows === right.castShadows &&
   left.receiveShadows === right.receiveShadows &&
+  left.selfShadows === right.selfShadows &&
   left.meshId === right.meshId &&
   left.specular === right.specular &&
-  left.shininess === right.shininess;
+  left.shininess === right.shininess &&
+  left.roughness === right.roughness;
 
 const sameLightState = (left: LightPanelState, right: LightPanelState) =>
   left.mode === right.mode &&
   left.intensity === right.intensity &&
   left.color === right.color &&
-  left.castShadows === right.castShadows;
+  left.castShadows === right.castShadows &&
+  left.innerConeDeg === right.innerConeDeg &&
+  left.outerConeDeg === right.outerConeDeg &&
+  left.range === right.range &&
+  left.falloff === right.falloff;
 
 const syncState = <T,>(setter: (updater: (previous: T) => T) => void, next: T, same: (left: T, right: T) => boolean) => {
   setter((previous) => (same(previous, next) ? previous : next));
@@ -112,9 +130,11 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       color: rgb01ToHex(objectInfo.color),
       castShadows: objectInfo.castShadows,
       receiveShadows: objectInfo.receiveShadows,
+      selfShadows: objectInfo.selfShadows,
       meshId: objectInfo.meshId,
       specular: objectInfo.specular,
-      shininess: objectInfo.shininess
+      shininess: objectInfo.shininess,
+      roughness: objectInfo.roughness
     }, sameObjectState);
 
     const lightInfo = renderer.getLightInfo();
@@ -122,7 +142,11 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       mode: lightInfo.mode,
       intensity: lightInfo.intensity,
       color: rgb01ToHex(lightInfo.color),
-      castShadows: lightInfo.castShadows
+      castShadows: lightInfo.castShadows,
+      innerConeDeg: lightInfo.innerConeDeg,
+      outerConeDeg: lightInfo.outerConeDeg,
+      range: lightInfo.range,
+      falloff: lightInfo.falloff
     }, sameLightState);
   }, [rendererRef]);
 
@@ -155,6 +179,10 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
 
   const handleResetScene = () => {
     runRendererCommand((renderer) => renderer.resetScene());
+  };
+
+  const handleLightingPreset = () => {
+    runRendererCommand((renderer) => renderer.applyLightingPreset());
   };
 
   const handleSaveScene = () => {
@@ -211,6 +239,26 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   const handleLightCastShadowsChange = (value: boolean) => {
     setLightState((previous) => ({ ...previous, castShadows: value }));
     runRendererCommand((renderer) => renderer.setActiveLightCastShadows(value));
+  };
+
+  const handleSpotInnerConeDegChange = (value: number) => {
+    setLightState((previous) => ({ ...previous, innerConeDeg: value }));
+    runRendererCommand((renderer) => renderer.setActiveLightSpotInnerCone(value));
+  };
+
+  const handleSpotOuterConeDegChange = (value: number) => {
+    setLightState((previous) => ({ ...previous, outerConeDeg: value }));
+    runRendererCommand((renderer) => renderer.setActiveLightSpotOuterCone(value));
+  };
+
+  const handleSpotRangeChange = (value: number) => {
+    setLightState((previous) => ({ ...previous, range: value }));
+    runRendererCommand((renderer) => renderer.setActiveLightSpotRange(value));
+  };
+
+  const handleSpotFalloffChange = (value: number) => {
+    setLightState((previous) => ({ ...previous, falloff: value }));
+    runRendererCommand((renderer) => renderer.setActiveLightSpotFalloff(value));
   };
 
   const handleLoadObjectTexture = (file: File) => {
@@ -280,6 +328,11 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
     runRendererCommand((renderer) => renderer.setActiveObjectReceiveShadows(value));
   };
 
+  const handleObjectSelfShadowsChange = (value: boolean) => {
+    setObjectState((previous) => ({ ...previous, selfShadows: value }));
+    runRendererCommand((renderer) => renderer.setActiveObjectSelfShadows(value));
+  };
+
   const handleObjectMeshChange = (meshId: number) => {
     setObjectState((previous) => ({ ...previous, meshId }));
     runRendererCommand((renderer) => renderer.setActiveObjectMesh(meshId));
@@ -291,8 +344,13 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   };
 
   const handleObjectShininessChange = (value: number) => {
-    setObjectState((previous) => ({ ...previous, shininess: value }));
+    setObjectState((previous) => ({ ...previous, shininess: value, roughness: Math.max(0.02, Math.min(1, 1 - (value - 4) / 124)) }));
     runRendererCommand((renderer) => renderer.setActiveObjectShininess(value));
+  };
+
+  const handleObjectRoughnessChange = (value: number) => {
+    setObjectState((previous) => ({ ...previous, roughness: value, shininess: 4 + (1 - value) * 124 }));
+    runRendererCommand((renderer) => renderer.setActiveObjectRoughness(value));
   };
 
   return {
@@ -304,6 +362,7 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       onLoadModel: handleLoadModel,
       onResetScene: handleResetScene,
       onResetModel: handleResetModel,
+      onLightingPreset: handleLightingPreset,
       lightMode: lightState.mode,
       onLightModeChange: handleLightModeChange,
       onLoadObjectTexture: handleLoadObjectTexture,
@@ -330,6 +389,14 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       onLightColorChange: handleLightColorChange,
       lightCastShadows: lightState.castShadows,
       onLightCastShadowsChange: handleLightCastShadowsChange,
+      spotInnerConeDeg: lightState.innerConeDeg,
+      onSpotInnerConeDegChange: handleSpotInnerConeDegChange,
+      spotOuterConeDeg: lightState.outerConeDeg,
+      onSpotOuterConeDegChange: handleSpotOuterConeDegChange,
+      spotRange: lightState.range,
+      onSpotRangeChange: handleSpotRangeChange,
+      spotFalloff: lightState.falloff,
+      onSpotFalloffChange: handleSpotFalloffChange,
       lightCount: lightMeta.count,
       activeLightIndex: lightMeta.activeIndex,
       onSelectLight: handleSelectLight,
@@ -348,13 +415,17 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       onObjectCastShadowsChange: handleObjectCastShadowsChange,
       objectReceiveShadows: objectState.receiveShadows,
       onObjectReceiveShadowsChange: handleObjectReceiveShadowsChange,
+      objectSelfShadows: objectState.selfShadows,
+      onObjectSelfShadowsChange: handleObjectSelfShadowsChange,
       meshOptions,
       activeMeshId: objectState.meshId,
       onObjectMeshChange: handleObjectMeshChange,
       objectSpecular: objectState.specular,
       onObjectSpecularChange: handleObjectSpecularChange,
       objectShininess: objectState.shininess,
-      onObjectShininessChange: handleObjectShininessChange
+      onObjectShininessChange: handleObjectShininessChange,
+      objectRoughness: objectState.roughness,
+      onObjectRoughnessChange: handleObjectRoughnessChange
     }
   };
 };

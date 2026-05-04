@@ -5,11 +5,13 @@ import { ModelLoader } from "../loaders/ModelLoader";
 import { CameraController } from "./CameraController";
 import {
   createAxisGizmoGeometry,
+  createBeveledCubeGeometry,
   createCubeGeometry,
   createGridGeometry,
   createLightMeshesGeometry,
   createWallsGeometry,
 } from "./geometryData";
+import { SphereGenerator } from "../geometry/SphereGenerator";
 import { orthoZO } from "./math";
 import { createRendererPipelines } from "./pipelines";
 import {
@@ -36,13 +38,16 @@ import type {
   LightDef,
   LightMode,
   MeshDef,
+  PerformanceMetrics,
   SceneDTO,
   SceneObject,
   Selection,
+  ShadowDebugMode,
+  LightDebugMode,
   ShadowMethod,
 } from "./types";
 
-export type { LightMode, ShadowMethod } from "./types";
+export type { LightMode, PerformanceMetrics, ShadowDebugMode, ShadowMethod } from "./types";
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -54,6 +59,8 @@ export class Renderer {
   private vsmMomentsPipeline!: GPURenderPipeline;
   private blurHorizontalPipeline!: GPUComputePipeline;
   private shadowPipeline!: GPURenderPipeline;
+  private debugShadowDepthPipeline!: GPURenderPipeline;
+  private debugVsmPipeline!: GPURenderPipeline;
   private depthTex!: GPUTexture;
   private depthView!: GPUTextureView;
   private arcball!: ArcballController;
@@ -75,7 +82,11 @@ export class Renderer {
   private shadowTex1!: GPUTexture;
   private shadowView1!: GPUTextureView;
   private shadowSampler!: GPUSampler; // общий sampler_comparison
-  private shadowSamplerLinear!: GPUSampler; // для PCSS
+  private shadowDebugSampler!: GPUSampler;
+  private shadowDebugTex!: GPUTexture;
+  private shadowDebugView!: GPUTextureView;
+  private shadowDebugTex1!: GPUTexture;
+  private shadowDebugView1!: GPUTextureView;
 
   // VSM текстуры
   private vsmMomentsTex!: GPUTexture;
@@ -124,9 +135,13 @@ export class Renderer {
   private axisUniformBuf!: GPUBuffer;
   private bindGroup0Main!: GPUBindGroup;
   private bindGroup0Shadow!: GPUBindGroup;
+  private bindGroup0DebugShadowDepth!: GPUBindGroup;
   private bindGroup0VSMMoments!: GPUBindGroup;
   private bindGroup1Main!: GPUBindGroup;
   private vsmBlurBindGroup0!: GPUBindGroup; // input -> output
+  private debugShadowPrimaryBindGroup!: GPUBindGroup;
+  private debugShadowSecondaryBindGroup!: GPUBindGroup;
+  private debugVsmBindGroup!: GPUBindGroup;
 
   private gridParamsBuf!: GPUBuffer;
   private shadingBuf!: GPUBuffer;
@@ -170,20 +185,37 @@ export class Renderer {
 
   private frameCount = 0;
   private lastFpsUpdate = performance.now();
+  private performanceStartTime = performance.now();
+  private totalFrameCount = 0;
   private currentFps = 0;
-  private fpsCallback?: (fps: number) => void;
+  private currentFrameTimeMs = 0;
+  private frameTimeHistory: number[] = [];
+  private fpsSampleHistory: number[] = [];
+  private sessionMinFps = Number.POSITIVE_INFINITY;
+  private sessionMaxFps = 0;
+  private sessionFrameTimeSumMs = 0;
+  private sessionFrameCount = 0;
+  private sessionMaxFrameTimeMs = 0;
+  private lastFpsSampleDurationMs = 0;
+  private performanceCallback?: (metrics: PerformanceMetrics) => void;
 
   private shadowParams = {
     shadowMapSize: 2048,
-    bias: 0.005,
+    bias: 0.003,
     method: "SM" as ShadowMethod,
-    pcfRadius: 2.0,
-    pcfSamples: 16,
-    pcssLightSize: 0.05,
-    pcssBlockerSearchSamples: 16,
-    vsmMinVariance: 0.00001,
-    vsmLightBleedReduction: 0.3,
+    pcfRadius: 2.5,
+    pcfSamples: 8,
+    pcssLightSize: 0.08,
+    pcssBlockerSearchSamples: 8,
+    vsmMinVariance: 0.0001,
+    vsmLightBleedReduction: 0.4,
     shadowStrength: 1.0,
+    ambientStrength: 0.4,
+    exposure: 0.9,
+    hemisphereSkyColor: [0.62, 0.68, 0.78] as [number, number, number],
+    hemisphereGroundColor: [0.18, 0.16, 0.14] as [number, number, number],
+    lightDebugMode: "final" as LightDebugMode,
+    debugShadowMap: "off" as ShadowDebugMode,
   };
   private lightMode: LightMode = "sun";
   private shadowStrength = 1.0;
@@ -205,10 +237,10 @@ export class Renderer {
 
   private lightBeamDirty = true;
 
-  private tempShadingData = new Float32Array(8);
+  private tempShadingData = new Float32Array(24);
   private tempShadowMats = new Float32Array(40);
   private tempGridParams = new Float32Array(8);
-  private tempLightsData = new Float32Array(8 + 4 * 12);
+  private tempLightsData = new Float32Array(8 + 4 * 16);
   private tempAxisUniform = new Float32Array(16 * 3 + 4 * 3);
   private tempObjParams = new Float32Array(8);
   private tempLightUniform = new Float32Array(4);
@@ -216,10 +248,10 @@ export class Renderer {
   private tempShadowParamsUniform = new Float32Array(4);
   private tempLightBeamVertices = new Float32Array(6);
   private tempZeroBeamVertices = new Float32Array(6);
-  private lastShadingData = new Float32Array(8);
+  private lastShadingData = new Float32Array(24);
   private lastShadowMats = new Float32Array(40);
   private lastGridParams = new Float32Array(8);
-  private lastLightsData = new Float32Array(8 + 4 * 12);
+  private lastLightsData = new Float32Array(8 + 4 * 16);
   private lastObjParams = new Float32Array(8);
   private lastUniformViewProj = new Float32Array(16);
   private lastUniformLight = new Float32Array(4);
@@ -436,10 +468,12 @@ export class Renderer {
       return {
         color: [1, 1, 1] as [number, number, number],
         castShadows: true,
-        receiveShadows: true,
+        receiveShadows: false,
+        selfShadows: false,
         meshId: this.defaultMeshId,
         specular: 0.5,
         shininess: 32.0,
+        roughness: 0.45,
       };
     }
     return {
@@ -450,9 +484,11 @@ export class Renderer {
       ],
       castShadows: obj.castShadows,
       receiveShadows: obj.receiveShadows,
+      selfShadows: obj.selfShadows,
       meshId: obj.meshId,
       specular: obj.specular,
       shininess: obj.shininess,
+      roughness: obj.roughness,
     };
   }
 
@@ -468,6 +504,16 @@ export class Renderer {
     const obj = this.objects[this.activeObjectIndex];
     if (obj) {
       obj.shininess = value;
+      obj.roughness = Math.max(0.02, Math.min(1, 1 - (value - 4) / 124));
+      this.markObjectParamsDirty();
+    }
+  }
+
+  setActiveObjectRoughness(value: number) {
+    const obj = this.objects[this.activeObjectIndex];
+    if (obj) {
+      obj.roughness = value;
+      obj.shininess = 4 + (1 - value) * 124;
       this.markObjectParamsDirty();
     }
   }
@@ -493,6 +539,14 @@ export class Renderer {
     const obj = this.objects[this.activeObjectIndex];
     if (obj) {
       obj.receiveShadows = value;
+      this.markObjectParamsDirty();
+    }
+  }
+
+  setActiveObjectSelfShadows(value: boolean) {
+    const obj = this.objects[this.activeObjectIndex];
+    if (obj) {
+      obj.selfShadows = value;
       this.markObjectParamsDirty();
     }
   }
@@ -523,6 +577,38 @@ export class Renderer {
     const l = this.lights[this.activeLightIndex];
     if (l) {
       l.intensity = value;
+      this.markLightDataDirty();
+    }
+  }
+
+  setActiveLightSpotInnerCone(value: number) {
+    const l = this.lights[this.activeLightIndex];
+    if (l) {
+      l.innerConeDeg = Math.min(value, l.outerConeDeg - 1);
+      this.markLightDataDirty();
+    }
+  }
+
+  setActiveLightSpotOuterCone(value: number) {
+    const l = this.lights[this.activeLightIndex];
+    if (l) {
+      l.outerConeDeg = Math.max(value, l.innerConeDeg + 1);
+      this.markLightDataDirty();
+    }
+  }
+
+  setActiveLightSpotRange(value: number) {
+    const l = this.lights[this.activeLightIndex];
+    if (l) {
+      l.range = value;
+      this.markLightDataDirty();
+    }
+  }
+
+  setActiveLightSpotFalloff(value: number) {
+    const l = this.lights[this.activeLightIndex];
+    if (l) {
+      l.falloff = value;
       this.markLightDataDirty();
     }
   }
@@ -857,8 +943,32 @@ export class Renderer {
     this.arcball = new ArcballController(this.canvas);
   }
 
+  setPerformanceCallback(callback: (metrics: PerformanceMetrics) => void) {
+    this.performanceCallback = callback;
+  }
+
   setFpsCallback(callback: (fps: number) => void) {
-    this.fpsCallback = callback;
+    this.setPerformanceCallback((metrics) => callback(metrics.fps));
+  }
+
+  resetPerformanceMetrics() {
+    const now = performance.now();
+    this.frameCount = 0;
+    this.totalFrameCount = 0;
+    this.lastFpsUpdate = now;
+    this.lastFrameTime = now;
+    this.performanceStartTime = now;
+    this.currentFps = 0;
+    this.currentFrameTimeMs = 0;
+    this.frameTimeHistory = [];
+    this.fpsSampleHistory = [];
+    this.sessionMinFps = Number.POSITIVE_INFINITY;
+    this.sessionMaxFps = 0;
+    this.sessionFrameTimeSumMs = 0;
+    this.sessionFrameCount = 0;
+    this.sessionMaxFrameTimeMs = 0;
+    this.lastFpsSampleDurationMs = 0;
+    this.performanceCallback?.(this.getPerformanceMetrics());
   }
 
   private handleSelectionClick(clientX: number, clientY: number) {
@@ -1060,7 +1170,24 @@ export class Renderer {
     this.shadowTex1 = resources.shadowTex1;
     this.shadowView1 = resources.shadowView1;
     this.shadowSampler = resources.shadowSampler;
-    this.shadowSamplerLinear = resources.shadowSamplerLinear;
+    this.shadowDebugSampler = resources.shadowSamplerLinear;
+
+    this.shadowDebugTex?.destroy();
+    this.shadowDebugTex1?.destroy();
+    this.shadowDebugTex = device.createTexture({
+      label: "primary shadow debug color texture",
+      size: [this.shadowSize, this.shadowSize],
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    this.shadowDebugView = this.shadowDebugTex.createView();
+    this.shadowDebugTex1 = device.createTexture({
+      label: "secondary shadow debug color texture",
+      size: [this.shadowSize, this.shadowSize],
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    this.shadowDebugView1 = this.shadowDebugTex1.createView();
 
     console.log("✓ Shadow resources created");
   }
@@ -1079,6 +1206,8 @@ export class Renderer {
     this.gridPipeline = pipelines.gridPipeline;
     this.lightBeamPipeline = pipelines.lightBeamPipeline;
     this.axisPipeline = pipelines.axisPipeline;
+    this.debugShadowDepthPipeline = pipelines.debugShadowDepthPipeline;
+    this.debugVsmPipeline = pipelines.debugVsmPipeline;
   }
 
   private createVSMResources() {
@@ -1123,7 +1252,7 @@ export class Renderer {
 
     this.meshes = [];
     this.meshById.clear();
-    const mesh: MeshDef = {
+    const cubeMesh: MeshDef = {
       id: 0,
       name: "Cube",
       vbo: this.vbo,
@@ -1132,8 +1261,73 @@ export class Renderer {
       ibo: this.ibo,
       indexCount: this.indexCount,
     };
-    this.meshes.push(mesh);
-    this.meshById.set(mesh.id, mesh);
+
+    const beveled = createBeveledCubeGeometry();
+    const beveledVbo = createBufferFromData(
+      this.gpu.device,
+      beveled.positions,
+      GPUBufferUsage.VERTEX,
+    );
+    const beveledNbo = createBufferFromData(
+      this.gpu.device,
+      beveled.normals,
+      GPUBufferUsage.VERTEX,
+    );
+    const beveledTbo = createBufferFromData(
+      this.gpu.device,
+      beveled.uvs,
+      GPUBufferUsage.VERTEX,
+    );
+    const beveledIbo = createBufferFromData(
+      this.gpu.device,
+      beveled.indices,
+      GPUBufferUsage.INDEX,
+    );
+    const beveledMesh: MeshDef = {
+      id: 1,
+      name: "Bevelled cube",
+      vbo: beveledVbo,
+      nbo: beveledNbo,
+      tbo: beveledTbo,
+      ibo: beveledIbo,
+      indexCount: beveled.indices.length,
+    };
+
+    const sphere = SphereGenerator.createIcosphere(1.15, 3);
+    const sphereVbo = createBufferFromData(
+      this.gpu.device,
+      sphere.positions,
+      GPUBufferUsage.VERTEX,
+    );
+    const sphereNbo = createBufferFromData(
+      this.gpu.device,
+      sphere.normals,
+      GPUBufferUsage.VERTEX,
+    );
+    const sphereTbo = createBufferFromData(
+      this.gpu.device,
+      new Float32Array((sphere.positions.length / 3) * 2),
+      GPUBufferUsage.VERTEX,
+    );
+    const sphereIbo = createBufferFromData(
+      this.gpu.device,
+      sphere.indices,
+      GPUBufferUsage.INDEX,
+    );
+    const sphereMesh: MeshDef = {
+      id: 2,
+      name: "Smooth sphere",
+      vbo: sphereVbo,
+      nbo: sphereNbo,
+      tbo: sphereTbo,
+      ibo: sphereIbo,
+      indexCount: sphere.indices.length,
+    };
+
+    this.meshes.push(cubeMesh, beveledMesh, sphereMesh);
+    this.meshById.set(cubeMesh.id, cubeMesh);
+    this.meshById.set(beveledMesh.id, beveledMesh);
+    this.meshById.set(sphereMesh.id, sphereMesh);
     this.defaultMeshId = 0;
   }
 
@@ -1239,11 +1433,19 @@ export class Renderer {
     if (this.shadowParams.method === "VSM") currentPipeline = this.pipelineVSM;
 
     this.bindGroup0Shadow = device.createBindGroup({
+      label: "shadow pass uniforms bind group",
       layout: this.shadowPipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }],
     });
 
+    this.bindGroup0DebugShadowDepth = device.createBindGroup({
+      label: "debug shadow depth uniforms bind group",
+      layout: this.debugShadowDepthPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }],
+    });
+
     this.bindGroup0VSMMoments = device.createBindGroup({
+      label: "vsm moments uniforms bind group",
       layout: this.vsmMomentsPipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }],
     });
@@ -1300,6 +1502,33 @@ export class Renderer {
       entries: [
         { binding: 0, resource: this.vsmMomentsView },
         { binding: 1, resource: this.vsmBlurView },
+      ],
+    });
+
+    this.debugShadowPrimaryBindGroup = device.createBindGroup({
+      label: "primary shadow debug overlay bind group",
+      layout: this.debugVsmPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: this.shadowDebugView },
+        { binding: 1, resource: this.shadowDebugSampler },
+      ],
+    });
+
+    this.debugShadowSecondaryBindGroup = device.createBindGroup({
+      label: "secondary shadow debug overlay bind group",
+      layout: this.debugVsmPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: this.shadowDebugView1 },
+        { binding: 1, resource: this.shadowDebugSampler },
+      ],
+    });
+
+    this.debugVsmBindGroup = device.createBindGroup({
+      label: "vsm debug overlay bind group",
+      layout: this.debugVsmPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: this.vsmBlurView },
+        { binding: 1, resource: this.vsmSampler },
       ],
     });
 
@@ -1407,7 +1636,8 @@ export class Renderer {
       vec3.set(up, 0, 0, 1);
     }
 
-    mat4.lookAt(this.tempLightView, pos, [0, 0, 0], up);
+    const target = this.getShadowTargetForLight(main);
+    mat4.lookAt(this.tempLightView, pos, target, up);
 
     const size = 8;
     const near = 1.0;
@@ -1435,7 +1665,8 @@ export class Renderer {
       vec3.set(up, 0, 0, 1);
     }
 
-    mat4.lookAt(this.tempLightView, l.pos, [0, 0, 0], up);
+    const target = this.getShadowTargetForLight(l);
+    mat4.lookAt(this.tempLightView, l.pos, target, up);
 
     const size = 8;
     const near = 1.0;
@@ -1444,6 +1675,22 @@ export class Renderer {
 
     mat4.multiply(out, this.tempLightProj, this.tempLightView);
     return out;
+  }
+
+  private getShadowTargetForLight(light?: LightDef): vec3 {
+    const target = this.tempLightBeamEnd;
+    if (!light || light.type !== "spot") {
+      vec3.set(target, 0, 0, 0);
+      return target;
+    }
+
+    const dir = this.tempLightBeamDir;
+    dir[0] = Math.cos(light.pitch) * Math.sin(light.yaw);
+    dir[1] = Math.sin(light.pitch);
+    dir[2] = Math.cos(light.pitch) * Math.cos(light.yaw);
+    vec3.normalize(dir, dir);
+    vec3.scaleAndAdd(target, light.pos, dir, 10.0);
+    return target;
   }
 
   private updateLightBeamGeometry() {
@@ -1623,6 +1870,10 @@ export class Renderer {
         position: vec3.clone(this.lightDir),
         color: [1, 1, 1] as [number, number, number],
         castShadows: true,
+        innerConeDeg: 15,
+        outerConeDeg: 28,
+        range: 12,
+        falloff: 1.5,
       };
     }
     return {
@@ -1635,6 +1886,10 @@ export class Renderer {
         number,
       ],
       castShadows: active.castShadows,
+      innerConeDeg: active.innerConeDeg,
+      outerConeDeg: active.outerConeDeg,
+      range: active.range,
+      falloff: active.falloff,
     };
   }
 
@@ -1676,6 +1931,10 @@ export class Renderer {
   }
 
   start() {
+    const now = performance.now();
+    this.lastFrameTime = now;
+    this.lastFpsUpdate = now;
+    this.performanceStartTime = now;
     const loop = () => {
       this.rafId = requestAnimationFrame(loop);
       this.frame();
@@ -1692,6 +1951,8 @@ export class Renderer {
     if (this.depthTex) this.depthTex.destroy();
     if (this.shadowTex) this.shadowTex.destroy();
     if (this.shadowTex1) this.shadowTex1.destroy();
+    if (this.shadowDebugTex) this.shadowDebugTex.destroy();
+    if (this.shadowDebugTex1) this.shadowDebugTex1.destroy();
     if (this.vsmMomentsTex) this.vsmMomentsTex.destroy();
     if (this.vsmBlurTex) this.vsmBlurTex.destroy();
     if (this.vbo) this.vbo.destroy();
@@ -1721,18 +1982,33 @@ export class Renderer {
     const { device, context } = this.gpu;
 
     this.frameCount++;
+    this.totalFrameCount++;
     const now = performance.now();
     const deltaTime = (now - this.lastFrameTime) / 1000;
+    this.currentFrameTimeMs = deltaTime * 1000;
     this.lastFrameTime = now;
+    this.sessionFrameTimeSumMs += this.currentFrameTimeMs;
+    this.sessionFrameCount++;
+    this.sessionMaxFrameTimeMs = Math.max(this.sessionMaxFrameTimeMs, this.currentFrameTimeMs);
+    this.frameTimeHistory.push(this.currentFrameTimeMs);
+    if (this.frameTimeHistory.length > 120) {
+      this.frameTimeHistory.shift();
+    }
 
     if (now - this.lastFpsUpdate > 500) {
-      this.currentFps = Math.round(
-        (this.frameCount * 1000) / (now - this.lastFpsUpdate),
-      );
+      this.lastFpsSampleDurationMs = now - this.lastFpsUpdate;
+      const fpsSample = (this.frameCount * 1000) / this.lastFpsSampleDurationMs;
+      this.currentFps = Math.round(fpsSample);
+      this.fpsSampleHistory.push(fpsSample);
+      if (this.fpsSampleHistory.length > 120) {
+        this.fpsSampleHistory.shift();
+      }
+      this.sessionMinFps = Math.min(this.sessionMinFps, fpsSample);
+      this.sessionMaxFps = Math.max(this.sessionMaxFps, fpsSample);
       this.frameCount = 0;
       this.lastFpsUpdate = now;
-      if (this.fpsCallback) {
-        this.fpsCallback(this.currentFps);
+      if (this.performanceCallback) {
+        this.performanceCallback(this.getPerformanceMetrics());
       }
     }
 
@@ -1763,6 +2039,24 @@ export class Renderer {
       shadingData[5] = this.lightIntensity;
       shadingData[6] = caster0;
       shadingData[7] = caster1;
+      shadingData[8] = this.shadowParams.ambientStrength ?? 0.4;
+      shadingData[9] = this.shadowParams.exposure ?? 0.9;
+      shadingData[10] = this.getLightDebugModeIndex();
+      shadingData[11] = 0;
+      const sky = this.shadowParams.hemisphereSkyColor ?? [0.62, 0.68, 0.78];
+      const ground = this.shadowParams.hemisphereGroundColor ?? [0.18, 0.16, 0.14];
+      shadingData[12] = sky[0];
+      shadingData[13] = sky[1];
+      shadingData[14] = sky[2];
+      shadingData[15] = 0;
+      shadingData[16] = ground[0];
+      shadingData[17] = ground[1];
+      shadingData[18] = ground[2];
+      shadingData[19] = 0;
+      shadingData[20] = 0;
+      shadingData[21] = 0;
+      shadingData[22] = 0;
+      shadingData[23] = 0;
       device.queue.writeBuffer(this.shadingBuf, 0, shadingData);
       this.lastShadingData.set(shadingData);
       this.shadingBufferDirty = false;
@@ -1771,34 +2065,39 @@ export class Renderer {
     const lightViewProj0 = this.tempLightViewProj0;
     const lightViewProj1 = this.tempLightViewProj1;
 
-    if (this.shadowMatsBufferDirty) {
-      mat4.identity(lightViewProj0);
-      mat4.identity(lightViewProj1);
+    mat4.identity(lightViewProj0);
+    mat4.identity(lightViewProj1);
 
-      if (caster0 >= 0) {
-        this.computeLightViewProjFor(caster0, lightViewProj0);
-        mat4.copy(this.lightViewProj, lightViewProj0);
-      }
+    if (caster0 >= 0) {
+      this.computeLightViewProjFor(caster0, lightViewProj0);
+      mat4.copy(this.lightViewProj, lightViewProj0);
+    }
 
-      if (caster1 >= 0) {
-        this.computeLightViewProjFor(caster1, lightViewProj1);
-      }
+    if (caster1 >= 0) {
+      this.computeLightViewProjFor(caster1, lightViewProj1);
+    }
 
-      const shadowMats = this.tempShadowMats;
-      shadowMats.fill(0);
+    const shadowMats = this.tempShadowMats;
+    shadowMats.fill(0);
 
-      if (caster0 >= 0) {
-        shadowMats[0] = 1.0;
-        shadowMats.set(lightViewProj0, 4);
-      }
+    if (caster0 >= 0) {
+      shadowMats[0] = 1.0;
+      shadowMats.set(lightViewProj0, 4);
+    }
 
-      if (caster1 >= 0 && caster0 >= 0) {
-        shadowMats.set(lightViewProj1, 4 + 16);
-        shadowMats[0] = 2.0;
-      }
+    if (caster1 >= 0 && caster0 >= 0) {
+      shadowMats.set(lightViewProj1, 4 + 16);
+      shadowMats[0] = 2.0;
+    }
 
-      device.queue.writeBuffer(this.shadowMatsBuf, 0, shadowMats);
-      this.lastShadowMats.set(shadowMats);
+    if (
+      this.writeBufferIfChanged(
+        this.shadowMatsBuf,
+        shadowMats,
+        this.lastShadowMats,
+        this.shadowMatsBufferDirty,
+      )
+    ) {
       this.shadowMatsBufferDirty = false;
     }
 
@@ -1817,7 +2116,7 @@ export class Renderer {
 
     if (this.lightsBufferDirty) {
       const maxLights = 4;
-      const lightStructFloats = 12;
+      const lightStructFloats = 16;
       const lightsData = this.tempLightsData;
       lightsData.fill(0);
 
@@ -1843,6 +2142,10 @@ export class Renderer {
         lightsData[base + 8] = l?.color[0] ?? 1.0;
         lightsData[base + 9] = l?.color[1] ?? 1.0;
         lightsData[base + 10] = l?.color[2] ?? 1.0;
+        lightsData[base + 12] = l?.innerConeDeg ?? 15;
+        lightsData[base + 13] = l?.outerConeDeg ?? 28;
+        lightsData[base + 14] = l?.range ?? 12;
+        lightsData[base + 15] = l?.falloff ?? 1.5;
       }
 
       device.queue.writeBuffer(this.lightsBuf, 0, lightsData);
@@ -1989,6 +2292,31 @@ export class Renderer {
     }
 
     const encoder = device.createCommandEncoder();
+    const debugShadowDepth = this.shadowParams.debugShadowMap !== "off" && this.shadowParams.method !== "VSM";
+
+    if (debugShadowDepth && (caster0 < 0 || (this.shadowParams.method === "SM" && caster1 < 0))) {
+      const clearDebugPass = encoder.beginRenderPass({
+        colorAttachments: [
+          ...(caster0 < 0
+            ? [{
+                view: this.shadowDebugView,
+                clearValue: { r: 1.0, g: 1.0, b: 0.0, a: 1.0 },
+                loadOp: "clear" as const,
+                storeOp: "store" as const,
+              }]
+            : []),
+          ...(this.shadowParams.method === "SM" && caster1 < 0
+            ? [{
+                view: this.shadowDebugView1,
+                clearValue: { r: 1.0, g: 1.0, b: 0.0, a: 1.0 },
+                loadOp: "clear" as const,
+                storeOp: "store" as const,
+              }]
+            : []),
+        ],
+      });
+      clearDebugPass.end();
+    }
 
     // Shadow pass
     if (this.shadowParams.method === "VSM") {
@@ -2010,6 +2338,11 @@ export class Renderer {
       });
       vsmPass.setPipeline(this.vsmMomentsPipeline);
       vsmPass.setBindGroup(0, this.bindGroup0VSMMoments);
+      device.queue.writeBuffer(
+        this.uniformBuf,
+        32 * 4,
+        lightViewProj0 as Float32Array,
+      );
 
       for (const obj of this.objects) {
         if (!obj.castShadows) continue;
@@ -2078,6 +2411,10 @@ export class Renderer {
           }
 
           shadowPass0.end();
+
+          if (debugShadowDepth) {
+            this.renderShadowDebugDepthPass(encoder, this.shadowDebugView, lightViewProj0, rotation);
+          }
         }
 
         // PASS 1: caster1 -> shadowView1
@@ -2120,6 +2457,10 @@ export class Renderer {
           }
 
           shadowPass1.end();
+
+          if (debugShadowDepth) {
+            this.renderShadowDebugDepthPass(encoder, this.shadowDebugView1, lightViewProj1, rotation);
+          }
         }
       } else {
         // PCF / PCSS: один shadow-pass в shadowView (как и раньше)
@@ -2132,8 +2473,13 @@ export class Renderer {
             depthStoreOp: "store",
           },
         });
-        shadowPass.setPipeline(this.shadowPipeline);
-        shadowPass.setBindGroup(0, this.bindGroup0Shadow);
+          shadowPass.setPipeline(this.shadowPipeline);
+          shadowPass.setBindGroup(0, this.bindGroup0Shadow);
+          device.queue.writeBuffer(
+            this.uniformBuf,
+            32 * 4,
+            lightViewProj0 as Float32Array,
+          );
 
         for (const obj of this.objects) {
           if (!obj.castShadows) continue;
@@ -2154,6 +2500,10 @@ export class Renderer {
           shadowPass.drawIndexed(mesh.indexCount);
         }
         shadowPass.end();
+
+        if (debugShadowDepth) {
+          this.renderShadowDebugDepthPass(encoder, this.shadowDebugView, lightViewProj0, rotation);
+        }
       }
     }
 
@@ -2164,10 +2514,11 @@ export class Renderer {
       currentPipeline = this.pipelinePCSS;
     if (this.shadowParams.method === "VSM") currentPipeline = this.pipelineVSM;
 
+    const frameView = context.getCurrentTexture().createView();
     const scenePass = encoder.beginRenderPass({
       colorAttachments: [
         {
-          view: context.getCurrentTexture().createView(),
+          view: frameView,
           clearValue: { r: 0.08, g: 0.09, b: 0.11, a: 1 },
           loadOp: "clear",
           storeOp: "store",
@@ -2208,8 +2559,8 @@ export class Renderer {
       objParams[3] = obj.receiveShadows ? 1.0 : 0.0;
       objParams[4] = obj.specular;
       objParams[5] = obj.shininess;
-      objParams[6] = 0.0;
-      objParams[7] = 0.0;
+      objParams[6] = obj.selfShadows ? 1.0 : 0.0;
+      objParams[7] = obj.roughness;
       if (
         this.writeBufferIfChanged(
           this.objectParamsBuf,
@@ -2262,7 +2613,123 @@ export class Renderer {
 
     scenePass.end();
 
+    this.renderShadowDebugOverlay(encoder, frameView);
+
     device.queue.submit([encoder.finish()]);
+  }
+
+  private renderShadowDebugDepthPass(
+    encoder: GPUCommandEncoder,
+    targetView: GPUTextureView,
+    lightViewProj: mat4,
+    rotation: mat4,
+  ) {
+    const { device } = this.gpu;
+    const debugPass = encoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: targetView,
+          clearValue: { r: 1.0, g: 1.0, b: 0.0, a: 1.0 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+    });
+
+    debugPass.setPipeline(this.debugShadowDepthPipeline);
+    debugPass.setBindGroup(0, this.bindGroup0DebugShadowDepth);
+    device.queue.writeBuffer(
+      this.uniformBuf,
+      32 * 4,
+      lightViewProj as Float32Array,
+    );
+
+    for (const obj of this.objects) {
+      if (!obj.castShadows) continue;
+
+      const mesh = this.getMesh(obj.meshId);
+      debugPass.setVertexBuffer(0, mesh.vbo);
+      debugPass.setIndexBuffer(mesh.ibo, "uint16");
+
+      const modelMat = this.tempObjectModel;
+      mat4.fromTranslation(modelMat, obj.pos);
+      mat4.multiply(modelMat, modelMat, rotation);
+      device.queue.writeBuffer(this.uniformBuf, 0, modelMat as Float32Array);
+
+      debugPass.drawIndexed(mesh.indexCount);
+    }
+
+    debugPass.end();
+  }
+
+  private renderShadowDebugOverlay(encoder: GPUCommandEncoder, frameView: GPUTextureView) {
+    if (this.shadowParams.debugShadowMap === "off") return;
+
+    const isVsm = this.shadowParams.method === "VSM";
+    const bindGroup = isVsm
+      ? this.debugVsmBindGroup
+      : this.shadowParams.debugShadowMap === "secondary" && this.shadowParams.method === "SM"
+        ? this.debugShadowSecondaryBindGroup
+        : this.debugShadowPrimaryBindGroup;
+
+    const rect = this.canvas.getBoundingClientRect();
+    const dprX = rect.width > 0 ? this.canvas.width / rect.width : 1;
+    const dprY = rect.height > 0 ? this.canvas.height / rect.height : 1;
+    const previewCssSize = Math.min(220, Math.floor(Math.min(rect.width, rect.height) * 0.26));
+    const marginCss = 16;
+    const previewWidth = Math.floor(previewCssSize * dprX);
+    const previewHeight = Math.floor(previewCssSize * dprY);
+    const x = Math.floor(marginCss * dprX);
+    const y = Math.max(Math.floor(marginCss * dprY), this.canvas.height - previewHeight - Math.floor(marginCss * dprY));
+
+    const debugPass = encoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: frameView,
+          loadOp: "load",
+          storeOp: "store",
+        },
+      ],
+    });
+    debugPass.setViewport(x, y, previewWidth, previewHeight, 0, 1);
+    debugPass.setScissorRect(x, y, previewWidth, previewHeight);
+    debugPass.setPipeline(this.debugVsmPipeline);
+    debugPass.setBindGroup(0, bindGroup);
+    debugPass.draw(3);
+    debugPass.end();
+  }
+
+  private getPerformanceMetrics(): PerformanceMetrics {
+    const history = this.frameTimeHistory.slice();
+    const recentFpsSamples = this.fpsSampleHistory.length ? this.fpsSampleHistory : [this.currentFps];
+    const elapsedMs = Math.max(0, performance.now() - this.performanceStartTime);
+    const averageFps = elapsedMs > 0 ? (this.totalFrameCount * 1000) / elapsedMs : 0;
+    const averageFrameTimeMs =
+      this.sessionFrameCount > 0 ? this.sessionFrameTimeSumMs / this.sessionFrameCount : 0;
+
+    return {
+      fps: this.currentFps,
+      averageFps: Math.round(averageFps),
+      recentMinFps: Math.round(Math.min(...recentFpsSamples)),
+      recentMaxFps: Math.round(Math.max(...recentFpsSamples)),
+      sessionMinFps: Number.isFinite(this.sessionMinFps) ? Math.round(this.sessionMinFps) : 0,
+      sessionMaxFps: Math.round(this.sessionMaxFps),
+      frameTimeMs: this.currentFrameTimeMs,
+      averageFrameTimeMs,
+      maxFrameTimeMs: this.sessionMaxFrameTimeMs,
+      frameTimeHistory: history,
+      sampleDurationMs: this.lastFpsSampleDurationMs,
+    };
+  }
+
+  private getLightDebugModeIndex() {
+    const mode = this.shadowParams.lightDebugMode ?? "final";
+    if (mode === "lighting") return 1;
+    if (mode === "diffuse") return 2;
+    if (mode === "specular") return 3;
+    if (mode === "shadow") return 4;
+    if (mode === "normals") return 5;
+    return 0;
   }
 
   updateShadowParams(params: {
@@ -2276,6 +2743,12 @@ export class Renderer {
     vsmMinVariance?: number;
     vsmLightBleedReduction?: number;
     shadowStrength?: number;
+    ambientStrength?: number;
+    exposure?: number;
+    hemisphereSkyColor?: [number, number, number];
+    hemisphereGroundColor?: [number, number, number];
+    lightDebugMode?: LightDebugMode;
+    debugShadowMap?: ShadowDebugMode;
   }) {
     const methodChanged = params.method !== this.shadowParams.method;
     const sizeChanged = params.shadowMapSize !== this.shadowSize;
@@ -2295,6 +2768,16 @@ export class Renderer {
         params.vsmLightBleedReduction ??
         this.shadowParams.vsmLightBleedReduction,
       shadowStrength: params.shadowStrength ?? this.shadowParams.shadowStrength,
+      ambientStrength:
+        params.ambientStrength ?? this.shadowParams.ambientStrength,
+      exposure: params.exposure ?? this.shadowParams.exposure,
+      hemisphereSkyColor:
+        params.hemisphereSkyColor ?? this.shadowParams.hemisphereSkyColor,
+      hemisphereGroundColor:
+        params.hemisphereGroundColor ?? this.shadowParams.hemisphereGroundColor,
+      lightDebugMode:
+        params.lightDebugMode ?? this.shadowParams.lightDebugMode,
+      debugShadowMap: params.debugShadowMap ?? this.shadowParams.debugShadowMap,
     };
     this.shadowStrength = this.shadowParams.shadowStrength ?? 1.0;
     this.shadingBufferDirty = true;
@@ -2351,6 +2834,132 @@ export class Renderer {
     console.log(
       "✓ Scene reset to defaults (camera/light/object/light/shadows)",
     );
+  }
+
+  applyLightingPreset() {
+    this.cameraController.reset();
+    this.updateViewProj();
+
+    this.objects = [
+      createSceneObject({
+        id: 0,
+        objectPos: vec3.fromValues(-2.2, 0, 0),
+        objectMoveSpeed: this.objectMoveSpeed,
+        defaultMeshId: this.defaultMeshId,
+        def: {
+          pos: vec3.fromValues(-2.2, 0, 0),
+          meshId: 1,
+          color: vec3.fromValues(0.95, 0.95, 0.9),
+          castShadows: true,
+          receiveShadows: false,
+          selfShadows: false,
+          specular: 0.5,
+          roughness: 0.38,
+          shininess: 4 + (1 - 0.38) * 124,
+        },
+      }),
+      createSceneObject({
+        id: 1,
+        objectPos: vec3.fromValues(1.8, 0, 0.4),
+        objectMoveSpeed: this.objectMoveSpeed,
+        defaultMeshId: this.defaultMeshId,
+        def: {
+          pos: vec3.fromValues(1.8, 0, 0.4),
+          meshId: 2,
+          color: vec3.fromValues(0.75, 0.82, 1.0),
+          castShadows: true,
+          receiveShadows: false,
+          selfShadows: false,
+          specular: 0.75,
+          roughness: 0.22,
+          shininess: 4 + (1 - 0.22) * 124,
+        },
+      }),
+    ];
+    this.activeObjectIndex = 0;
+    vec3.copy(this.objectPos, this.objects[0].pos);
+
+    this.lights = [
+      createLight({
+        objectPos: this.objectPos,
+        def: {
+          pos: vec3.fromValues(5.5, 6.5, 4),
+          type: "spot",
+          yaw: -2.35,
+          pitch: -0.7,
+          intensity: 1.35,
+          color: vec3.fromValues(1.0, 0.74, 0.58),
+          castShadows: true,
+          innerConeDeg: 18,
+          outerConeDeg: 36,
+          range: 16,
+          falloff: 1.3,
+        },
+      }),
+      createLight({
+        objectPos: this.objectPos,
+        def: {
+          pos: vec3.fromValues(-5, 5.4, -3.5),
+          type: "spot",
+          yaw: 0.78,
+          pitch: -0.55,
+          intensity: 1.05,
+          color: vec3.fromValues(0.48, 0.66, 1.0),
+          castShadows: true,
+          innerConeDeg: 20,
+          outerConeDeg: 42,
+          range: 15,
+          falloff: 1.6,
+        },
+      }),
+      createLight({
+        objectPos: this.objectPos,
+        def: {
+          pos: vec3.fromValues(0, 8, 0),
+          type: "top",
+          intensity: 0.35,
+          color: vec3.fromValues(0.9, 1.0, 0.88),
+          castShadows: false,
+        },
+      }),
+    ];
+    this.activeLightIndex = 0;
+    const main = this.lights[0];
+    this.lightMode = main.type;
+    this.lightIntensity = main.intensity;
+    vec3.copy(this.lightDir, main.pos);
+    this.spotYaw = main.yaw;
+    this.spotPitch = main.pitch;
+
+    this.shadowParams = {
+      ...this.shadowParams,
+      method: "PCF",
+      shadowMapSize: 2048,
+      bias: 0.003,
+      pcfRadius: 2.5,
+      pcfSamples: 16,
+      shadowStrength: 1.0,
+      ambientStrength: 0.36,
+      exposure: 0.92,
+      hemisphereSkyColor: [0.56, 0.62, 0.76],
+      hemisphereGroundColor: [0.16, 0.14, 0.13],
+      lightDebugMode: "final",
+      debugShadowMap: "off",
+    };
+    this.shadowStrength = this.shadowParams.shadowStrength;
+    this.shadowSize = this.shadowParams.shadowMapSize;
+    this.createShadowResources();
+    this.createVSMResources();
+    this.recreateBindGroups();
+    this.arcball.reset();
+    this.selection = "none";
+    this.markObjectParamsDirty();
+    this.markLightDataDirty();
+    this.shadingBufferDirty = true;
+    this.shadowMatsBufferDirty = true;
+    this.uniformShadowParamsDirty = true;
+    this.lightBeamDirty = true;
+    this.updateLightViewProj();
   }
 
   resetModel() {

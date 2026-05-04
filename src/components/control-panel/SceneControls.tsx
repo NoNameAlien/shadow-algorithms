@@ -20,6 +20,9 @@ type Props = Pick<
   | 'onLoadFloorTexture'
   | 'onSaveScene'
   | 'onLoadSceneFile'
+  | 'onExportCsv'
+  | 'onExportPdf'
+  | 'onExportScreenshot'
 > & {
   lang: Lang;
   strings: ControlPanelStrings;
@@ -53,7 +56,10 @@ export function SceneControls({
   onLoadObjectTexture,
   onLoadFloorTexture,
   onSaveScene,
-  onLoadSceneFile
+  onLoadSceneFile,
+  onExportCsv,
+  onExportPdf,
+  onExportScreenshot
 }: Props) {
   return (
     <>
@@ -89,6 +95,9 @@ export function SceneControls({
         sceneFileInputRef={sceneFileInputRef}
         onSaveScene={onSaveScene}
         onLoadSceneFile={onLoadSceneFile}
+        onExportCsv={onExportCsv}
+        onExportPdf={onExportPdf}
+        onExportScreenshot={onExportScreenshot}
       />
     </>
   );
