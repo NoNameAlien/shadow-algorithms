@@ -134,30 +134,32 @@ export function createBeveledCubeGeometry(radius = 0.22, segments = 8): MeshGeom
   };
 }
 
-export function createGridGeometry(): Omit<MeshGeometry, 'indices'> {
+export function createGridGeometry(size = 10): Omit<MeshGeometry, 'indices'> {
+  const uvMax = size / 2;
   return {
     positions: new Float32Array([
-      -10, -2.5, -10, 10, -2.5, -10, 10, -2.5, 10,
-      -10, -2.5, -10, 10, -2.5, 10, -10, -2.5, 10
+      -size, -2.5, -size, size, -2.5, -size, size, -2.5, size,
+      -size, -2.5, -size, size, -2.5, size, -size, -2.5, size
     ]),
     normals: new Float32Array([
       0, 1, 0, 0, 1, 0, 0, 1, 0,
       0, 1, 0, 0, 1, 0, 0, 1, 0
     ]),
     uvs: new Float32Array([
-      0, 0, 5, 0, 5, 5,
-      0, 0, 5, 5, 0, 5
+      0, 0, uvMax, 0, uvMax, uvMax,
+      0, 0, uvMax, uvMax, 0, uvMax
     ])
   };
 }
 
-export function createWallsGeometry(): Omit<MeshGeometry, 'indices'> {
+export function createWallsGeometry(size = 10): Omit<MeshGeometry, 'indices'> {
   const yBottom = -2.5;
   const yTop = 7.5;
-  const xMin = -10;
-  const xMax = 10;
-  const zMin = -10;
-  const zMax = 10;
+  const xMin = -size;
+  const xMax = size;
+  const zMin = -size;
+  const zMax = size;
+  const uvMax = size / 2;
 
   const backPos = [
     xMin, yBottom, zMin,
@@ -172,8 +174,8 @@ export function createWallsGeometry(): Omit<MeshGeometry, 'indices'> {
     0, 0, 1, 0, 0, 1, 0, 0, 1
   ];
   const backUV = [
-    0, 0, 5, 0, 5, 5,
-    0, 0, 5, 5, 0, 5
+    0, 0, uvMax, 0, uvMax, 5,
+    0, 0, uvMax, 5, 0, 5
   ];
 
   const rightPos = [
@@ -189,8 +191,8 @@ export function createWallsGeometry(): Omit<MeshGeometry, 'indices'> {
     -1, 0, 0, -1, 0, 0, -1, 0, 0
   ];
   const rightUV = [
-    0, 0, 5, 0, 5, 5,
-    0, 0, 5, 5, 0, 5
+    0, 0, uvMax, 0, uvMax, 5,
+    0, 0, uvMax, 5, 0, 5
   ];
 
   return {

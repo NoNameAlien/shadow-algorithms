@@ -1,5 +1,5 @@
 import { EntitySelector } from './EntitySelector';
-import { LightModeSection, LightSettingsSection } from './LightSettingsSection';
+import { LightSettingsSection } from './LightSettingsSection';
 import type { ControlPanelProps, ControlPanelStrings, Lang } from './types';
 
 type Props = Pick<
@@ -24,9 +24,11 @@ type Props = Pick<
   | 'onSpotFalloffChange'
   | 'lightCount'
   | 'activeLightIndex'
+  | 'lightNames'
   | 'onSelectLight'
   | 'onAddLight'
   | 'onRemoveLight'
+  | 'onRenameLight'
 > & {
   lang: Lang;
   strings: ControlPanelStrings;
@@ -55,9 +57,11 @@ export function LightControls({
   onSpotFalloffChange,
   lightCount,
   activeLightIndex,
+  lightNames,
   onSelectLight,
   onAddLight,
-  onRemoveLight
+  onRemoveLight,
+  onRenameLight
 }: Props) {
   return (
     <>
@@ -66,19 +70,20 @@ export function LightControls({
         prefix="L"
         count={lightCount}
         activeIndex={activeLightIndex}
+        names={lightNames}
         lang={lang}
         addTitle={lang === 'ru' ? 'Добавить источник' : 'Add light'}
         removeTitle={lang === 'ru' ? 'Удалить источник (кроме первого)' : 'Remove light (except first)'}
         onSelect={onSelectLight}
         onAdd={onAddLight}
         onRemove={onRemoveLight}
+        onRename={onRenameLight}
       />
-
-      <LightModeSection strings={strings} lightMode={lightMode} onLightModeChange={onLightModeChange} />
 
       <LightSettingsSection
         lang={lang}
         strings={strings}
+        lightMode={lightMode}
         lightIntensity={lightIntensity}
         lightColor={lightColor}
         lightCastShadows={lightCastShadows}
@@ -87,6 +92,7 @@ export function LightControls({
         spotOuterConeDeg={spotOuterConeDeg}
         spotRange={spotRange}
         spotFalloff={spotFalloff}
+        onLightModeChange={onLightModeChange}
         onLightIntensityChange={onLightIntensityChange}
         onLightColorChange={onLightColorChange}
         onLightCastShadowsChange={onLightCastShadowsChange}

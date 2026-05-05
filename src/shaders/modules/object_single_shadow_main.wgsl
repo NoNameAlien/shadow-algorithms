@@ -52,7 +52,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
 
   for (var i = 0; i < lightCount; i = i + 1) {
     let light = lightsData.lights[i];
-    let isShadowed = (i == caster) && (receive > 0.5) && (objParams.spec.z > 0.5);
+    let isShadowed = (i == caster) && (receive > 0.5);
 
     let contrib = computeLightContribution(
       N,

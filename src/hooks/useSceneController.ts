@@ -9,7 +9,7 @@ import type { ScenePresetSelection } from '../components/control-panel/types';
 
 type Lang = 'en' | 'ru';
 type MeshOption = { id: number; name: string };
-type EntityMeta = { count: number; activeIndex: number };
+type EntityMeta = { count: number; activeIndex: number; names: string[] };
 type SceneSnapshot = ReturnType<Renderer['exportScene']>;
 
 type ObjectPanelState = {
@@ -56,10 +56,13 @@ const DEFAULT_OBJECT_STATE: ObjectPanelState = {
   roughness: 0.45
 };
 
-const DEFAULT_META: EntityMeta = { count: 1, activeIndex: 0 };
+const DEFAULT_META: EntityMeta = { count: 1, activeIndex: 0, names: [] };
 
 const sameMeta = (left: EntityMeta, right: EntityMeta) =>
-  left.count === right.count && left.activeIndex === right.activeIndex;
+  left.count === right.count &&
+  left.activeIndex === right.activeIndex &&
+  left.names.length === right.names.length &&
+  left.names.every((name, index) => name === right.names[index]);
 
 const sameMeshes = (left: MeshOption[], right: MeshOption[]) =>
   left.length === right.length &&
@@ -109,6 +112,8 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   const [showLightBeam, setShowLightBeam] = useState(true);
   const [showFloor, setShowFloor] = useState(true);
   const [showWalls, setShowWalls] = useState(true);
+  const [floorSize, setFloorSize] = useState(10);
+  const [showGrid, setShowGrid] = useState(true);
   const [floorColor, setFloorColor] = useState('#26282d');
   const [wallColor, setWallColor] = useState('#1f2226');
   const [lightsScreen, setLightsScreen] = useState<LightScreenPosition[]>([]);
@@ -184,6 +189,8 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   const handleResetScene = () => {
     runRendererCommand((renderer) => renderer.resetScene());
     setActiveScenePreset('custom');
+    setFloorSize(10);
+    setShowGrid(true);
   };
 
   const handleLightingPreset = () => {
@@ -196,6 +203,8 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
     setActiveScenePreset(presetId);
     setShowFloor(preset.showFloor);
     setShowWalls(preset.showWalls);
+    setFloorSize(preset.floorSize ?? 10);
+    setShowGrid(preset.showGrid ?? true);
     setFloorColor(rgb01ToHex(preset.floorColor));
     setWallColor(rgb01ToHex(preset.wallColor));
     setShowLightBeam(true);
@@ -214,6 +223,12 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       file,
       (scene) => {
         setActiveScenePreset('custom');
+        setShowFloor(scene.showFloor);
+        setShowWalls(scene.showWalls);
+        setFloorSize(scene.floorSize ?? 10);
+        setShowGrid(scene.showGrid ?? true);
+        setFloorColor(rgb01ToHex(scene.floorColor));
+        setWallColor(rgb01ToHex(scene.wallColor));
         runRendererCommand((renderer) => renderer.importScene(scene));
       },
       (error) => {
@@ -301,6 +316,18 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
     runRendererCommand((renderer) => renderer.setWallsVisible(value));
   };
 
+  const handleFloorSizeChange = (value: number) => {
+    setFloorSize(value);
+    setActiveScenePreset('custom');
+    runRendererCommand((renderer) => renderer.setFloorSize(value));
+  };
+
+  const handleShowGridChange = (value: boolean) => {
+    setShowGrid(value);
+    setActiveScenePreset('custom');
+    runRendererCommand((renderer) => renderer.setGridVisible(value));
+  };
+
   const handleFloorColorChange = (hex: string) => {
     setFloorColor(hex);
     setActiveScenePreset('custom');
@@ -325,6 +352,10 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
     runRendererCommand((renderer) => renderer.removeLight(lightMeta.activeIndex));
   };
 
+  const handleRenameLight = (index: number, name: string) => {
+    runRendererCommand((renderer) => renderer.renameLight(index, name));
+  };
+
   const handleSelectObject = (index: number) => {
     runRendererCommand((renderer) => renderer.setActiveObject(index));
   };
@@ -337,6 +368,11 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   const handleRemoveObject = () => {
     setActiveScenePreset('custom');
     runRendererCommand((renderer) => renderer.removeObject(objectMeta.activeIndex));
+  };
+
+  const handleRenameObject = (index: number, name: string) => {
+    setActiveScenePreset('custom');
+    runRendererCommand((renderer) => renderer.renameObject(index, name));
   };
 
   const handleObjectColorChange = (hex: string) => {
@@ -402,10 +438,14 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       onToggleAutoRotate: handleToggleAutoRotate,
       showFloor,
       showWalls,
+      floorSize,
+      showGrid,
       floorColor,
       wallColor,
       onShowFloorChange: handleShowFloorChange,
       onShowWallsChange: handleShowWallsChange,
+      onFloorSizeChange: handleFloorSizeChange,
+      onShowGridChange: handleShowGridChange,
       onFloorColorChange: handleFloorColorChange,
       onWallColorChange: handleWallColorChange,
       objectMoveSpeed,
@@ -428,14 +468,18 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       onSpotFalloffChange: handleSpotFalloffChange,
       lightCount: lightMeta.count,
       activeLightIndex: lightMeta.activeIndex,
+      lightNames: lightMeta.names,
       onSelectLight: handleSelectLight,
       onAddLight: handleAddLight,
       onRemoveLight: handleRemoveLight,
+      onRenameLight: handleRenameLight,
       objectCount: objectMeta.count,
       activeObjectIndex: objectMeta.activeIndex,
+      objectNames: objectMeta.names,
       onSelectObject: handleSelectObject,
       onAddObject: handleAddObject,
       onRemoveObject: handleRemoveObject,
+      onRenameObject: handleRenameObject,
       onSaveScene: handleSaveScene,
       onLoadSceneFile: handleLoadSceneFile,
       objectColor: objectState.color,

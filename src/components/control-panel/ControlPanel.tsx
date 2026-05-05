@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 import { INITIAL_PARAMS, STRINGS } from './constants';
 import { SCENE_PRESETS } from '../../engine/presets';
 import { Header } from './Header';
@@ -7,7 +7,7 @@ import { LightControls } from './LightControls';
 import { ObjectControls } from './ObjectControls';
 import { SceneControls } from './SceneControls';
 import { ShadowSettings } from './ShadowSettings';
-import { panelStyle } from './styles';
+import { dangerButtonStyle, panelStyle, primaryButtonStyle } from './styles';
 import type { ControlPanelProps, ShadowParams } from './types';
 
 export function ControlPanel({
@@ -29,10 +29,14 @@ export function ControlPanel({
   onToggleAutoRotate,
   showFloor,
   showWalls,
+  floorSize,
+  showGrid,
   floorColor,
   wallColor,
   onShowFloorChange,
   onShowWallsChange,
+  onFloorSizeChange,
+  onShowGridChange,
   onFloorColorChange,
   onWallColorChange,
   objectMoveSpeed,
@@ -55,14 +59,18 @@ export function ControlPanel({
   onSpotFalloffChange,
   lightCount,
   activeLightIndex,
+  lightNames,
   onSelectLight,
   onAddLight,
   onRemoveLight,
+  onRenameLight,
   objectCount,
   activeObjectIndex,
+  objectNames,
   onSelectObject,
   onAddObject,
   onRemoveObject,
+  onRenameObject,
   onSaveScene,
   onLoadSceneFile,
   onExportCsv,
@@ -88,7 +96,6 @@ export function ControlPanel({
 }: ControlPanelProps) {
   const [params, setParams] = useState<ShadowParams>(INITIAL_PARAMS);
   const [modelName, setModelName] = useState<string | null>(null);
-  const [showHints, setShowHints] = useState(false);
   const modelInputRef = useRef<HTMLInputElement | null>(null);
   const objectTextureInputRef = useRef<HTMLInputElement | null>(null);
   const floorTextureInputRef = useRef<HTMLInputElement | null>(null);
@@ -109,6 +116,8 @@ export function ControlPanel({
 
     onShowFloorChange(true);
     onShowWallsChange(true);
+    onFloorSizeChange(10);
+    onShowGridChange(true);
     onFloorColorChange('#26282d');
     onWallColorChange('#1f2226');
 
@@ -135,6 +144,7 @@ export function ControlPanel({
     setParams(presetParams);
     onParamsChange(presetParams);
     onLightingPreset?.();
+    if (autoRotate) onToggleAutoRotate();
   };
 
   const handleScenePresetChange = (presetId: keyof typeof SCENE_PRESETS) => {
@@ -148,10 +158,43 @@ export function ControlPanel({
       onParamsChange(nextParams);
     }
     onScenePresetChange(presetId);
+    if (autoRotate) onToggleAutoRotate();
+  };
+
+  const stopSidebarKeyboardActivation = (event: KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (target.getAttribute('data-allow-key-activation') === 'true') return;
+
+    if (
+      event.key === ' ' ||
+      event.code === 'Space' ||
+      event.key === 'Enter' ||
+      event.key.startsWith('Arrow') ||
+      event.key === 'Shift'
+    ) {
+      event.stopPropagation();
+      event.preventDefault();
+      event.nativeEvent.stopImmediatePropagation();
+    }
+  };
+
+  const blurKeyboardFocusedControl = (event: FocusEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (!target || target.getAttribute('data-allow-key-activation') === 'true') return;
+    if (target instanceof HTMLButtonElement) {
+      window.requestAnimationFrame(() => target.blur());
+    }
   };
 
   return (
-    <div style={panelStyle}>
+    <div
+      style={panelStyle}
+      data-ui-panel="true"
+      onKeyDownCapture={stopSidebarKeyboardActivation}
+      onKeyUpCapture={stopSidebarKeyboardActivation}
+      onFocusCapture={blurKeyboardFocusedControl}
+    >
       <Header
         autoRotate={autoRotate}
         lang={lang}
@@ -160,6 +203,8 @@ export function ControlPanel({
         onLanguageChange={onLanguageChange}
         onToggleAutoRotate={onToggleAutoRotate}
       />
+
+      <ShadowSettings params={params} strings={strings} onUpdate={updateParams} />
 
       <LightControls
         lang={lang}
@@ -184,9 +229,11 @@ export function ControlPanel({
         onSpotFalloffChange={onSpotFalloffChange}
         lightCount={lightCount}
         activeLightIndex={activeLightIndex}
+        lightNames={lightNames}
         onSelectLight={onSelectLight}
         onAddLight={onAddLight}
         onRemoveLight={onRemoveLight}
+        onRenameLight={onRenameLight}
       />
 
       <ObjectControls
@@ -194,9 +241,11 @@ export function ControlPanel({
         strings={strings}
         objectCount={objectCount}
         activeObjectIndex={activeObjectIndex}
+        objectNames={objectNames}
         onSelectObject={onSelectObject}
         onAddObject={onAddObject}
         onRemoveObject={onRemoveObject}
+        onRenameObject={onRenameObject}
         objectColor={objectColor}
         onObjectColorChange={onObjectColorChange}
         objectCastShadows={objectCastShadows}
@@ -218,13 +267,13 @@ export function ControlPanel({
         onObjectMoveSpeedChange={onObjectMoveSpeedChange}
       />
 
-      <ShadowSettings params={params} strings={strings} onUpdate={updateParams} />
-
       <SceneControls
         lang={lang}
         strings={strings}
         showFloor={showFloor}
         showWalls={showWalls}
+        floorSize={floorSize}
+        showGrid={showGrid}
         floorColor={floorColor}
         wallColor={wallColor}
         modelName={modelName}
@@ -235,6 +284,8 @@ export function ControlPanel({
         onModelNameChange={setModelName}
         onShowFloorChange={onShowFloorChange}
         onShowWallsChange={onShowWallsChange}
+        onFloorSizeChange={onFloorSizeChange}
+        onShowGridChange={onShowGridChange}
         onFloorColorChange={onFloorColorChange}
         onWallColorChange={onWallColorChange}
         onLoadModel={onLoadModel}
@@ -254,16 +305,10 @@ export function ControlPanel({
         type="button"
         onClick={applyLightingPreset}
         style={{
+          ...primaryButtonStyle,
           width: '100%',
           padding: 8,
-          marginBottom: 8,
-          background: '#2f9e44',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 6,
-          cursor: 'pointer',
-          fontSize: 14,
-          fontWeight: 600
+          marginBottom: 8
         }}
       >
         {lang === 'ru' ? 'Пресет света' : 'Lighting preset'}
@@ -273,16 +318,10 @@ export function ControlPanel({
         type="button"
         onClick={resetPanel}
         style={{
+          ...dangerButtonStyle,
           width: '100%',
           padding: 8,
-          marginBottom: 8,
-          background: '#c92a2a',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 6,
-          cursor: 'pointer',
-          fontSize: 14,
-          fontWeight: 600
+          marginBottom: 8
         }}
       >
         {strings.resetScene}
@@ -291,9 +330,7 @@ export function ControlPanel({
       <HintsSection
         lang={lang}
         strings={strings}
-        showHints={showHints}
         isPointerLocked={isPointerLocked}
-        onToggleHints={() => setShowHints((previous) => !previous)}
       />
     </div>
   );

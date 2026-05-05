@@ -153,6 +153,9 @@ export function createBufferFromData(
 
 export function createUniformBuffers(device: GPUDevice): UniformBuffers {
   const uniformSize = 16 * 4 * 3 + 4 * 4 * 3;
+  const maxLights = 16;
+  const lightStructFloats = 16;
+  const lightsBufferSize = (8 + maxLights * lightStructFloats) * 4;
 
   return {
     uniformBuf: device.createBuffer({
@@ -168,7 +171,7 @@ export function createUniformBuffers(device: GPUDevice): UniformBuffers {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     gridParamsBuf: device.createBuffer({
-      size: 32,
+      size: 48,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     objectParamsBuf: device.createBuffer({
@@ -180,7 +183,7 @@ export function createUniformBuffers(device: GPUDevice): UniformBuffers {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     lightsBuf: device.createBuffer({
-      size: 480,
+      size: lightsBufferSize,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     })
   };

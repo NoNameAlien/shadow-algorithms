@@ -28,6 +28,7 @@ export type PerformanceMetrics = {
 };
 
 export type LightDef = {
+  name: string;
   pos: vec3;
   type: LightMode;
   yaw: number;
@@ -43,6 +44,7 @@ export type LightDef = {
 
 export type SceneObject = {
   id: number;
+  name: string;
   pos: vec3;
   scale: vec3;
   moveSpeed: number;
@@ -67,6 +69,7 @@ export type MeshDef = {
 };
 
 export type LightDTO = {
+  name?: string;
   pos: [number, number, number];
   type: LightMode;
   yaw: number;
@@ -81,6 +84,7 @@ export type LightDTO = {
 };
 
 export type ObjectDTO = {
+  name?: string;
   pos: [number, number, number];
   scale?: [number, number, number];
   moveSpeed: number;
@@ -120,5 +124,7 @@ export type SceneDTO = {
   wallColor: [number, number, number];
   showFloor: boolean;
   showWalls: boolean;
+  floorSize?: number;
+  showGrid?: boolean;
   shadowParams: ShadowParamsDTO;
 };

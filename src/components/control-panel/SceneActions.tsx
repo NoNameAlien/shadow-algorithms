@@ -1,6 +1,8 @@
 import type { RefObject } from 'react';
 import { SCENE_PRESET_OPTIONS, type ScenePresetId } from '../../engine/presets';
 import { SelectControl } from './FormControls';
+import { PanelSection } from './PanelSection';
+import { primaryButtonStyle, subtleButtonStyle } from './styles';
 import type { Lang, ScenePresetSelection } from './types';
 
 type Props = {
@@ -26,18 +28,8 @@ export function SceneActions({
   onExportPdf,
   onExportScreenshot
 }: Props) {
-  const buttonBase = {
-    padding: 6,
-    color: '#fff',
-    border: 'none',
-    borderRadius: 6,
-    cursor: 'pointer',
-    fontSize: 13,
-    fontWeight: 600
-  };
-
   return (
-    <div style={{ marginBottom: 8 }}>
+    <PanelSection title={lang === 'ru' ? 'Сцена и экспорт' : 'Scene & export'}>
       <SelectControl
         label={lang === 'ru' ? 'Preset сцена' : 'Scene preset'}
         value={activeScenePreset}
@@ -54,37 +46,37 @@ export function SceneActions({
         marginBottom={8}
       />
       <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-      <button
-        type="button"
-        onClick={onSaveScene}
-        style={{
-          ...buttonBase,
-          flex: 1,
-          background: '#228be6'
-        }}
-      >
-        {lang === 'ru' ? 'Сохранить сцену' : 'Save scene'}
-      </button>
-      <button
-        type="button"
-        onClick={() => sceneFileInputRef.current?.click()}
-        style={{
-          ...buttonBase,
-          flex: 1,
-          background: '#495057'
-        }}
-      >
-        {lang === 'ru' ? 'Загрузить сцену' : 'Load scene'}
-      </button>
+        <button
+          type="button"
+          onClick={onSaveScene}
+          style={{
+            ...primaryButtonStyle,
+            padding: 6,
+            flex: 1
+          }}
+        >
+          {lang === 'ru' ? 'Сохранить сцену' : 'Save scene'}
+        </button>
+        <button
+          type="button"
+          onClick={() => sceneFileInputRef.current?.click()}
+          style={{
+            ...subtleButtonStyle,
+            padding: 6,
+            flex: 1
+          }}
+        >
+          {lang === 'ru' ? 'Загрузить сцену' : 'Load scene'}
+        </button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-        <button type="button" onClick={onExportCsv} style={{ ...buttonBase, background: '#2f9e44' }}>
+        <button type="button" onClick={onExportCsv} style={{ ...subtleButtonStyle, padding: 6 }}>
           CSV
         </button>
-        <button type="button" onClick={onExportPdf} style={{ ...buttonBase, background: '#6741d9' }}>
+        <button type="button" onClick={onExportPdf} style={{ ...subtleButtonStyle, padding: 6 }}>
           PDF
         </button>
-        <button type="button" onClick={onExportScreenshot} style={{ ...buttonBase, background: '#e67700' }}>
+        <button type="button" onClick={onExportScreenshot} style={{ ...subtleButtonStyle, padding: 6 }}>
           {lang === 'ru' ? 'Скрин' : 'Shot'}
         </button>
       </div>
@@ -98,6 +90,6 @@ export function SceneActions({
           if (file && onLoadSceneFile) onLoadSceneFile(file);
         }}
       />
-    </div>
+    </PanelSection>
   );
 }

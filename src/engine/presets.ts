@@ -3,6 +3,7 @@ import type { LightMode, ShadowMethod } from './types';
 export type ScenePresetId = 'multipleObjects' | 'stairs' | 'forest';
 
 export type ScenePresetObject = {
+  name?: string;
   pos: [number, number, number];
   scale?: [number, number, number];
   meshId?: number;
@@ -16,6 +17,7 @@ export type ScenePresetObject = {
 };
 
 export type ScenePresetLight = {
+  name?: string;
   pos: [number, number, number];
   type: LightMode;
   yaw?: number;
@@ -38,6 +40,8 @@ export type ScenePreset = {
   wallColor: [number, number, number];
   showFloor: boolean;
   showWalls: boolean;
+  floorSize?: number;
+  showGrid?: boolean;
   shadowMethod?: ShadowMethod;
 };
 
@@ -51,6 +55,8 @@ export const SCENE_PRESETS: Record<ScenePresetId, ScenePreset> = {
     label: { en: 'Multiple Objects', ru: 'Несколько объектов' },
     showFloor: true,
     showWalls: true,
+    floorSize: 12,
+    showGrid: true,
     floorColor: [0.14, 0.15, 0.17],
     wallColor: [0.1, 0.11, 0.13],
     shadowMethod: 'PCF',
@@ -137,6 +143,8 @@ export const SCENE_PRESETS: Record<ScenePresetId, ScenePreset> = {
     label: { en: 'Stairs', ru: 'Ступени' },
     showFloor: true,
     showWalls: true,
+    floorSize: 12,
+    showGrid: true,
     floorColor: [0.13, 0.14, 0.15],
     wallColor: [0.11, 0.1, 0.1],
     shadowMethod: 'PCF',
@@ -181,6 +189,8 @@ export const SCENE_PRESETS: Record<ScenePresetId, ScenePreset> = {
     label: { en: 'Forest', ru: 'Лес' },
     showFloor: true,
     showWalls: false,
+    floorSize: 14,
+    showGrid: false,
     floorColor: [0.11, 0.18, 0.12],
     wallColor: [0.08, 0.11, 0.09],
     shadowMethod: 'VSM',

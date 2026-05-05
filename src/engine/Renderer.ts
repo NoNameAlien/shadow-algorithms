@@ -50,6 +50,8 @@ import type {
 
 export type { LightMode, PerformanceMetrics, ShadowDebugMode, ShadowMethod } from "./types";
 
+const MAX_LIGHTS = 16;
+
 type ObjectDrawState = {
   mainUniformBuf: GPUBuffer;
   shadowUniformBuf0: GPUBuffer;
@@ -141,6 +143,7 @@ export class Renderer {
 
   private isDraggingObject = false;
   private objectDragStartPos = vec3.create();
+  private objectKeyboardKeys = new Set<string>();
 
   private isDraggingLight = false;
   private lightDragStartHit = vec3.create();
@@ -231,6 +234,8 @@ export class Renderer {
 
   private showFloor = true;
   private showWalls = true;
+  private floorSize = 10;
+  private showGrid = true;
   private floorColor = vec3.fromValues(0.15, 0.16, 0.18);
   private wallColor = vec3.fromValues(0.1, 0.11, 0.13);
   private objectMoveSpeed = 1.0;
@@ -248,8 +253,8 @@ export class Renderer {
 
   private tempShadingData = new Float32Array(24);
   private tempShadowMats = new Float32Array(40);
-  private tempGridParams = new Float32Array(8);
-  private tempLightsData = new Float32Array(8 + 4 * 16);
+  private tempGridParams = new Float32Array(12);
+  private tempLightsData = new Float32Array(8 + MAX_LIGHTS * 16);
   private tempAxisUniform = new Float32Array(16 * 3 + 4 * 3);
   private tempObjParams = new Float32Array(8);
   private tempLightUniform = new Float32Array(4);
@@ -259,8 +264,8 @@ export class Renderer {
   private tempZeroBeamVertices = new Float32Array(6);
   private lastShadingData = new Float32Array(24);
   private lastShadowMats = new Float32Array(40);
-  private lastGridParams = new Float32Array(8);
-  private lastLightsData = new Float32Array(8 + 4 * 16);
+  private lastGridParams = new Float32Array(12);
+  private lastLightsData = new Float32Array(8 + MAX_LIGHTS * 16);
   private lastUniformViewProj = new Float32Array(16);
   private lastUniformLight = new Float32Array(4);
   private lastUniformCamera = new Float32Array(4);
@@ -296,6 +301,7 @@ export class Renderer {
     return {
       count: this.lights.length,
       activeIndex: this.activeLightIndex,
+      names: this.lights.map((light, index) => light.name || `Light ${index + 1}`),
     };
   }
 
@@ -319,12 +325,13 @@ export class Renderer {
 
   // Добавить новый источник (возвращает его индекс)
   addLight(def?: Partial<LightDef>): number {
-    if (this.lights.length >= 4) {
-      console.warn("Максимум 4 источника света");
-      return this.lights.length - 1;
-    }
-
-    const light = createLight({ def, objectPos: this.objectPos });
+    const light = createLight({
+      def: {
+        ...def,
+        name: def?.name ?? `Light ${this.lights.length + 1}`,
+      },
+      objectPos: this.objectPos,
+    });
     this.lights.push(light);
     this.markLightDataDirty();
     const idx = this.lights.length - 1;
@@ -364,7 +371,20 @@ export class Renderer {
     return {
       count: this.objects.length,
       activeIndex: this.activeObjectIndex,
+      names: this.objects.map((object, index) => object.name || `Object ${index + 1}`),
     };
+  }
+
+  renameLight(index: number, name: string) {
+    const light = this.lights[index];
+    if (!light) return;
+    light.name = name.trim() || `Light ${index + 1}`;
+  }
+
+  renameObject(index: number, name: string) {
+    const object = this.objects[index];
+    if (!object) return;
+    object.name = name.trim() || `Object ${index + 1}`;
   }
 
   exportScene(): SceneDTO {
@@ -376,6 +396,8 @@ export class Renderer {
       wallColor: this.wallColor,
       showFloor: this.showFloor,
       showWalls: this.showWalls,
+      floorSize: this.floorSize,
+      showGrid: this.showGrid,
       shadowParams: this.shadowParams,
     });
   }
@@ -424,6 +446,10 @@ export class Renderer {
     this.markGridParamsDirty();
     this.showFloor = scene.showFloor;
     this.showWalls = scene.showWalls;
+    this.floorSize = scene.floorSize ?? 10;
+    this.showGrid = scene.showGrid ?? true;
+    this.createGrid();
+    this.createWalls();
 
     // Параметры теней
     this.updateShadowParams(scene.shadowParams);
@@ -641,6 +667,21 @@ export class Renderer {
     this.showWalls = visible;
   }
 
+  setFloorSize(size: number) {
+    const nextSize = Math.max(4, Math.min(30, size));
+    if (Math.abs(this.floorSize - nextSize) < 0.001) return;
+
+    this.floorSize = nextSize;
+    this.createGrid();
+    this.createWalls();
+    this.markGridParamsDirty();
+  }
+
+  setGridVisible(visible: boolean) {
+    this.showGrid = visible;
+    this.markGridParamsDirty();
+  }
+
   setFloorColor(rgb: [number, number, number]) {
     vec3.set(this.floorColor, rgb[0], rgb[1], rgb[2]);
     this.markGridParamsDirty();
@@ -653,12 +694,21 @@ export class Renderer {
 
   private getShadowCasters(max: number): number[] {
     const result: number[] = [];
+    let hasSunCaster = false;
+
     for (let i = 0; i < this.lights.length; i++) {
-      if (this.lights[i].castShadows) {
-        result.push(i);
-        if (result.length >= max) break;
+      const light = this.lights[i];
+      if (!light.castShadows) continue;
+
+      if (light.type === "sun") {
+        if (hasSunCaster) continue;
+        hasSunCaster = true;
       }
+
+      result.push(i);
+      if (result.length >= max) break;
     }
+
     return result;
   }
 
@@ -829,6 +879,118 @@ export class Renderer {
     }
   }
 
+  private rayAabbHit(rayOrigin: vec3, rayDir: vec3, min: vec3, max: vec3): number {
+    let tMin = Number.NEGATIVE_INFINITY;
+    let tMax = Number.POSITIVE_INFINITY;
+
+    for (let axis = 0; axis < 3; axis++) {
+      const origin = rayOrigin[axis];
+      const direction = rayDir[axis];
+      if (Math.abs(direction) < 1e-6) {
+        if (origin < min[axis] || origin > max[axis]) return Number.POSITIVE_INFINITY;
+        continue;
+      }
+
+      let t1 = (min[axis] - origin) / direction;
+      let t2 = (max[axis] - origin) / direction;
+      if (t1 > t2) {
+        const temp = t1;
+        t1 = t2;
+        t2 = temp;
+      }
+      tMin = Math.max(tMin, t1);
+      tMax = Math.min(tMax, t2);
+      if (tMin > tMax) return Number.POSITIVE_INFINITY;
+    }
+
+    if (tMax < 0) return Number.POSITIVE_INFINITY;
+    return tMin >= 0 ? tMin : tMax;
+  }
+
+  private rayObjectHit(rayOrigin: vec3, rayDir: vec3, object: SceneObject): number {
+    if (object.meshId === 2) {
+      const radius = 1.15 * Math.max(object.scale[0], object.scale[1], object.scale[2]);
+      return raySphereHit(rayOrigin, rayDir, object.pos, radius);
+    }
+
+    const min = vec3.fromValues(
+      object.pos[0] - Math.abs(object.scale[0]),
+      object.pos[1] - Math.abs(object.scale[1]),
+      object.pos[2] - Math.abs(object.scale[2]),
+    );
+    const max = vec3.fromValues(
+      object.pos[0] + Math.abs(object.scale[0]),
+      object.pos[1] + Math.abs(object.scale[1]),
+      object.pos[2] + Math.abs(object.scale[2]),
+    );
+    return this.rayAabbHit(rayOrigin, rayDir, min, max);
+  }
+
+  private normalizeObjectKeyboardKey(event: KeyboardEvent): string | null {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") {
+      return event.key;
+    }
+    if (event.code === "Space") return "Space";
+    if (event.key === "Shift") return "Shift";
+    return null;
+  }
+
+  private shouldCaptureObjectKeyboard(event: KeyboardEvent): boolean {
+    if ((this.selection !== "object" && this.selection !== "light") || this.cameraController.isLocked()) return false;
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest('[data-ui-panel="true"]')) {
+      return false;
+    }
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      target instanceof HTMLButtonElement
+    ) {
+      return false;
+    }
+    return this.normalizeObjectKeyboardKey(event) !== null;
+  }
+
+  private applySelectedEntityKeyboardMovement(deltaTime: number): boolean {
+    if (
+      (this.selection !== "object" && this.selection !== "light") ||
+      this.cameraController.isLocked() ||
+      this.objectKeyboardKeys.size === 0
+    ) {
+      return false;
+    }
+
+    const move = vec3.create();
+    if (this.objectKeyboardKeys.has("ArrowLeft")) move[0] -= 1;
+    if (this.objectKeyboardKeys.has("ArrowRight")) move[0] += 1;
+    if (this.objectKeyboardKeys.has("ArrowUp")) move[2] -= 1;
+    if (this.objectKeyboardKeys.has("ArrowDown")) move[2] += 1;
+    if (this.objectKeyboardKeys.has("Space")) move[1] += 1;
+    if (this.objectKeyboardKeys.has("Shift")) move[1] -= 1;
+
+    if (vec3.length(move) < 1e-5) return true;
+
+    vec3.normalize(move, move);
+
+    if (this.selection === "object") {
+      const obj = this.objects[this.activeObjectIndex];
+      if (!obj) return false;
+      vec3.scaleAndAdd(obj.pos, obj.pos, move, this.objectMoveSpeed * 2.5 * deltaTime);
+      vec3.copy(this.objectPos, obj.pos);
+    } else {
+      const light = this.lights[this.activeLightIndex];
+      if (!light) return false;
+      vec3.scaleAndAdd(light.pos, light.pos, move, 4.0 * deltaTime);
+      vec3.copy(this.lightDir, light.pos);
+      this.lightBeamDirty = true;
+      this.markLightDataDirty();
+      this.updateLightViewProj();
+    }
+
+    return true;
+  }
+
   private static floatArraysEqual(
     left: Float32Array,
     right: Float32Array,
@@ -942,8 +1104,14 @@ export class Renderer {
           return;
         }
 
-        // Если выбран свет, НЕ попали по оси и режим = SPOT → вращаем прожектор вокруг себя
         if (this.selection === "light" && this.lightMode === "spot") {
+          const previousLightIndex = this.activeLightIndex;
+          const picked = this.handleSelectionClick(e.clientX, e.clientY);
+          if (picked !== "light" || this.activeLightIndex !== previousLightIndex) {
+            return;
+          }
+
+          // Повторный drag по уже выбранной сфере spot light вращает прожектор.
           this.isRotatingLight = true;
           this.rotateStartMouseX = e.clientX;
           this.rotateStartMouseY = e.clientY;
@@ -961,6 +1129,20 @@ export class Renderer {
 
       // Иначе — просто выбор объекта/света
       this.handleSelectionClick(e.clientX, e.clientY);
+    });
+
+    window.addEventListener("keydown", (e) => {
+      if (!this.shouldCaptureObjectKeyboard(e)) return;
+      const key = this.normalizeObjectKeyboardKey(e);
+      if (!key) return;
+      this.objectKeyboardKeys.add(key);
+      e.preventDefault();
+    });
+
+    window.addEventListener("keyup", (e) => {
+      const key = this.normalizeObjectKeyboardKey(e);
+      if (!key) return;
+      this.objectKeyboardKeys.delete(key);
     });
 
     this.canvas.addEventListener("mousemove", (e) => {
@@ -1107,13 +1289,13 @@ export class Renderer {
     this.performanceCallback?.(this.getPerformanceMetrics());
   }
 
-  private handleSelectionClick(clientX: number, clientY: number) {
+  private handleSelectionClick(clientX: number, clientY: number): Selection {
     const rect = this.canvas.getBoundingClientRect();
     const x = ((clientX - rect.left) / rect.width) * 2 - 1;
     const y = 1 - ((clientY - rect.top) / rect.height) * 2;
 
     const invViewProj = mat4.invert(mat4.create(), this.viewProj);
-    if (!invViewProj) return;
+    if (!invViewProj) return "none";
 
     const nearPoint = vec3.fromValues(x, y, -1);
     const farPoint = vec3.fromValues(x, y, 1);
@@ -1126,15 +1308,12 @@ export class Renderer {
     const rayOrigin = this.cameraController.getCameraPosition();
 
     // Поиск ближайшего объекта
-    const objectRadius = 1.8;
     let bestObjT = Number.POSITIVE_INFINITY;
     let bestObjIndex = -1;
 
     for (let i = 0; i < this.objects.length; i++) {
       const object = this.objects[i];
-      const center = object.pos;
-      const scaledRadius = objectRadius * Math.max(object.scale[0], object.scale[1], object.scale[2]);
-      const t = raySphereHit(rayOrigin, rayDir, center, scaledRadius);
+      const t = this.rayObjectHit(rayOrigin, rayDir, object);
       if (t < bestObjT) {
         bestObjT = t;
         bestObjIndex = i;
@@ -1142,7 +1321,7 @@ export class Renderer {
     }
 
     // Поиск ближайшего источника света
-    const lightRadius = 0.9;
+    const lightRadius = 0.55;
     let bestLightT = Number.POSITIVE_INFINITY;
     let bestLightIndex = -1;
 
@@ -1160,7 +1339,7 @@ export class Renderer {
 
     if (!hasObj && !hasLight) {
       this.setSelection("none");
-      return;
+      return "none";
     }
 
     if (hasObj && hasLight) {
@@ -1168,19 +1347,20 @@ export class Renderer {
       if (bestLightT < bestObjT) {
         this.setActiveLight(bestLightIndex);
         this.setSelection("light");
+        return "light";
       } else {
         this.activeObjectIndex = bestObjIndex;
         const obj = this.objects[this.activeObjectIndex];
         vec3.copy(this.objectPos, obj.pos);
         this.setSelection("object");
+        return "object";
       }
-      return;
     }
 
     if (hasLight) {
       this.setActiveLight(bestLightIndex);
       this.setSelection("light");
-      return;
+      return "light";
     }
 
     if (hasObj) {
@@ -1188,13 +1368,15 @@ export class Renderer {
       const obj = this.objects[this.activeObjectIndex];
       vec3.copy(this.objectPos, obj.pos);
       this.setSelection("object");
-      return;
+      return "object";
     }
+
+    return "none";
   }
 
   private pickAxisHit(clientX: number, clientY: number): number {
     const axisLength = 2.2;
-    const pickThresholdPx = 20; // было 10 — сделаем зону захвата шире
+    const pickThresholdPx = 14;
 
     const rect = this.canvas.getBoundingClientRect();
     const mouseX = clientX - rect.left;
@@ -1270,6 +1452,12 @@ export class Renderer {
   private setSelection(sel: Selection) {
     if (this.selection === sel) return;
     this.selection = sel;
+    if (sel !== "object" && sel !== "light") {
+      this.objectKeyboardKeys.clear();
+      this.cameraController.setOrbitKeyboardSuppressed(false);
+    } else {
+      this.cameraController.setOrbitKeyboardSuppressed(true);
+    }
 
     this.lightSelected = sel === "light";
     this.uniformLightDirty = true;
@@ -1470,7 +1658,11 @@ export class Renderer {
   }
 
   private createGrid() {
-    const grid = createGridGeometry();
+    this.gridVBO?.destroy();
+    this.gridNBO?.destroy();
+    this.gridTBO?.destroy();
+
+    const grid = createGridGeometry(this.floorSize);
     this.gridVBO = createBufferFromData(
       this.gpu.device,
       grid.positions,
@@ -1489,7 +1681,11 @@ export class Renderer {
   }
 
   private createWalls() {
-    const walls = createWallsGeometry();
+    this.wallVBO?.destroy();
+    this.wallNBO?.destroy();
+    this.wallTBO?.destroy();
+
+    const walls = createWallsGeometry(this.floorSize);
     this.wallVBO = createBufferFromData(
       this.gpu.device,
       walls.positions,
@@ -2126,7 +2322,9 @@ export class Renderer {
     const lightModeIndex = this.getLightModeIndex();
     const methodIndex = this.getMethodIndex();
 
-    const casters = this.getShadowCasters(2);
+    // Lighting is multi-source, but the current shadow-map path is intentionally single-caster.
+    // Keeping one caster avoids mismatched secondary shadows where objects and floor disagree.
+    const casters = this.getShadowCasters(1);
     const caster0 = casters.length > 0 ? casters[0] : -1;
     const caster1 = casters.length > 1 ? casters[1] : -1;
 
@@ -2220,18 +2418,19 @@ export class Renderer {
       gridParams[4] = this.wallColor[0];
       gridParams[5] = this.wallColor[1];
       gridParams[6] = this.wallColor[2];
+      gridParams[8] = this.floorSize;
+      gridParams[9] = this.showGrid ? 1 : 0;
       device.queue.writeBuffer(this.gridParamsBuf, 0, gridParams);
       this.lastGridParams.set(gridParams);
       this.gridParamsBufferDirty = false;
     }
 
     if (this.lightsBufferDirty) {
-      const maxLights = 4;
       const lightStructFloats = 16;
       const lightsData = this.tempLightsData;
       lightsData.fill(0);
 
-      const count = Math.min(this.lights.length || 1, maxLights);
+      const count = Math.min(this.lights.length || 1, MAX_LIGHTS);
       lightsData[0] = count;
 
       for (let i = 0; i < count; i++) {
@@ -2268,6 +2467,8 @@ export class Renderer {
     if (activeObj) {
       vec3.copy(this.objectPos, activeObj.pos);
     }
+    const objectKeyboardActive = this.applySelectedEntityKeyboardMovement(deltaTime);
+    this.cameraController.setOrbitKeyboardSuppressed(objectKeyboardActive);
     this.cameraController.update(deltaTime);
     this.updateViewProj();
 
@@ -2678,7 +2879,7 @@ export class Renderer {
       scenePass.draw(12); // 2 стены по 6 вершин каждая
     }
 
-    if (this.showLightBeam) {
+    if (this.showLightBeam && this.selection === "light") {
       scenePass.setPipeline(this.lightBeamPipeline);
       scenePass.setBindGroup(0, this.lightBeamBindGroup);
       scenePass.setVertexBuffer(0, this.lightBeamVBO);
@@ -2897,6 +3098,11 @@ export class Renderer {
     this.lightMode = "sun";
     this.shadowParams.shadowStrength = 1.0;
     this.shadowStrength = 1.0;
+    this.floorSize = 10;
+    this.showGrid = true;
+    this.createGrid();
+    this.createWalls();
+    this.markGridParamsDirty();
 
     // Сбрасываем вращение объекта
     this.arcball.reset();
@@ -2904,6 +3110,8 @@ export class Renderer {
     // Сбрасываем позицию объекта и выделение
     vec3.set(this.objectPos, 0, 0, 0);
     this.selection = "none";
+    this.objectKeyboardKeys.clear();
+    this.cameraController.setOrbitKeyboardSuppressed(false);
     this.isDraggingObject = false;
     this.isDraggingLight = false;
     this.dragAxisIndex = -1;
@@ -3031,6 +3239,8 @@ export class Renderer {
     this.recreateBindGroups();
     this.arcball.reset();
     this.selection = "none";
+    this.objectKeyboardKeys.clear();
+    this.cameraController.setOrbitKeyboardSuppressed(false);
     this.markObjectParamsDirty();
     this.markLightDataDirty();
     this.shadingBufferDirty = true;
@@ -3054,6 +3264,7 @@ export class Renderer {
         objectMoveSpeed: this.objectMoveSpeed,
         defaultMeshId: this.defaultMeshId,
         def: {
+          name: object.name ?? `Object ${index + 1}`,
           pos: vec3.fromValues(object.pos[0], object.pos[1], object.pos[2]),
           scale: vec3.fromValues(
             object.scale?.[0] ?? 1,
@@ -3077,10 +3288,11 @@ export class Renderer {
     this.activeObjectIndex = 0;
     vec3.copy(this.objectPos, this.objects[0].pos);
 
-    this.lights = preset.lights.map((light) =>
+    this.lights = preset.lights.map((light, index) =>
       createLight({
         objectPos: this.objectPos,
         def: {
+          name: light.name ?? `Light ${index + 1}`,
           pos: vec3.fromValues(light.pos[0], light.pos[1], light.pos[2]),
           type: light.type,
           yaw: light.yaw ?? 0,
@@ -3113,6 +3325,10 @@ export class Renderer {
     vec3.set(this.wallColor, preset.wallColor[0], preset.wallColor[1], preset.wallColor[2]);
     this.showFloor = preset.showFloor;
     this.showWalls = preset.showWalls;
+    this.floorSize = preset.floorSize ?? 10;
+    this.showGrid = preset.showGrid ?? true;
+    this.createGrid();
+    this.createWalls();
 
     if (preset.shadowMethod) {
       this.updateShadowParams({
@@ -3123,6 +3339,8 @@ export class Renderer {
 
     this.arcball.reset();
     this.selection = "none";
+    this.objectKeyboardKeys.clear();
+    this.cameraController.setOrbitKeyboardSuppressed(false);
     this.isDraggingObject = false;
     this.isDraggingLight = false;
     this.isRotatingLight = false;

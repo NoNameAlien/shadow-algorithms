@@ -29,6 +29,7 @@ struct GridParams {
   _pad0: f32,
   wallColor: vec3<f32>,
   _pad1: f32,
+  options: vec4<f32>, // x: floor size, y: show grid
 };
 
 struct ShadowMatrices {
@@ -151,7 +152,8 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   if (isFloor) {
     baseColor = gridParams.floorColor * texColor;
     let gridLineColor = vec3<f32>(0.7, 0.75, 0.8);
-    baseColor = mix(baseColor, gridLineColor, gridAlpha);
+    let showGrid = gridParams.options.y;
+    baseColor = mix(baseColor, gridLineColor, gridAlpha * showGrid);
   } else {
     baseColor = gridParams.wallColor;
   }

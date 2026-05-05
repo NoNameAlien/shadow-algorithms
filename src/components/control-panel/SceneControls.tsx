@@ -8,10 +8,14 @@ type Props = Pick<
   ControlPanelProps,
   | 'showFloor'
   | 'showWalls'
+  | 'floorSize'
+  | 'showGrid'
   | 'floorColor'
   | 'wallColor'
   | 'onShowFloorChange'
   | 'onShowWallsChange'
+  | 'onFloorSizeChange'
+  | 'onShowGridChange'
   | 'onFloorColorChange'
   | 'onWallColorChange'
   | 'onLoadModel'
@@ -41,10 +45,14 @@ export function SceneControls({
   strings,
   showFloor,
   showWalls,
+  floorSize,
+  showGrid,
   floorColor,
   wallColor,
   onShowFloorChange,
   onShowWallsChange,
+  onFloorSizeChange,
+  onShowGridChange,
   onFloorColorChange,
   onWallColorChange,
   modelName,
@@ -72,10 +80,14 @@ export function SceneControls({
         strings={strings}
         showFloor={showFloor}
         showWalls={showWalls}
+        floorSize={floorSize}
+        showGrid={showGrid}
         floorColor={floorColor}
         wallColor={wallColor}
         onShowFloorChange={onShowFloorChange}
         onShowWallsChange={onShowWallsChange}
+        onFloorSizeChange={onFloorSizeChange}
+        onShowGridChange={onShowGridChange}
         onFloorColorChange={onFloorColorChange}
         onWallColorChange={onWallColorChange}
       />

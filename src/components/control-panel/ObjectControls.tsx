@@ -1,5 +1,4 @@
 import { EntitySelector } from './EntitySelector';
-import { ObjectMoveSpeedSection } from './EnvironmentSection';
 import { ObjectParamsSection } from './ObjectParamsSection';
 import type { ControlPanelProps, ControlPanelStrings, Lang } from './types';
 
@@ -7,9 +6,11 @@ type Props = Pick<
   ControlPanelProps,
   | 'objectCount'
   | 'activeObjectIndex'
+  | 'objectNames'
   | 'onSelectObject'
   | 'onAddObject'
   | 'onRemoveObject'
+  | 'onRenameObject'
   | 'objectColor'
   | 'onObjectColorChange'
   | 'objectCastShadows'
@@ -39,9 +40,11 @@ export function ObjectControls({
   strings,
   objectCount,
   activeObjectIndex,
+  objectNames,
   onSelectObject,
   onAddObject,
   onRemoveObject,
+  onRenameObject,
   objectColor,
   onObjectColorChange,
   objectCastShadows,
@@ -69,12 +72,14 @@ export function ObjectControls({
         prefix="O"
         count={objectCount}
         activeIndex={activeObjectIndex}
+        names={objectNames}
         lang={lang}
         addTitle={lang === 'ru' ? 'Добавить объект' : 'Add object'}
         removeTitle={lang === 'ru' ? 'Удалить объект (кроме первого)' : 'Remove object (except first)'}
         onSelect={onSelectObject}
         onAdd={onAddObject}
         onRemove={onRemoveObject}
+        onRename={onRenameObject}
       />
 
       <ObjectParamsSection
@@ -85,6 +90,7 @@ export function ObjectControls({
         objectSpecular={objectSpecular}
         objectShininess={objectShininess}
         objectRoughness={objectRoughness}
+        objectMoveSpeed={objectMoveSpeed}
         objectCastShadows={objectCastShadows}
         objectReceiveShadows={objectReceiveShadows}
         objectSelfShadows={objectSelfShadows}
@@ -93,16 +99,12 @@ export function ObjectControls({
         onObjectSpecularChange={onObjectSpecularChange}
         onObjectShininessChange={onObjectShininessChange}
         onObjectRoughnessChange={onObjectRoughnessChange}
+        onObjectMoveSpeedChange={onObjectMoveSpeedChange}
         onObjectCastShadowsChange={onObjectCastShadowsChange}
         onObjectReceiveShadowsChange={onObjectReceiveShadowsChange}
         onObjectSelfShadowsChange={onObjectSelfShadowsChange}
       />
 
-      <ObjectMoveSpeedSection
-        strings={strings}
-        objectMoveSpeed={objectMoveSpeed}
-        onObjectMoveSpeedChange={onObjectMoveSpeedChange}
-      />
     </>
   );
 }

@@ -18,6 +18,7 @@ export function createDefaultLights(params: {
 }): LightDef[] {
   return [
     {
+      name: 'Light 1',
       pos: vec3.clone(params.lightDir),
       type: params.lightMode,
       yaw: params.spotYaw,
@@ -31,6 +32,7 @@ export function createDefaultLights(params: {
       falloff: 1.6
     },
     {
+      name: 'Light 2',
       pos: vec3.fromValues(-6, 8, -4),
       type: 'spot',
       yaw: 0.8,
@@ -50,6 +52,7 @@ export function createDefaultObjects(defaultMeshId: number): SceneObject[] {
   return [
     {
       id: 0,
+      name: 'Object 1',
       pos: vec3.fromValues(0, 0, 0),
       scale: vec3.fromValues(1, 1, 1),
       moveSpeed: 1.0,
@@ -75,6 +78,7 @@ export function createLight(params: {
 
   return {
     pos: basePos,
+    name: params.def?.name ?? 'Light',
     type: params.def?.type ?? 'spot',
     yaw: params.def?.yaw ?? 0.8,
     pitch: params.def?.pitch ?? -0.6,
@@ -101,6 +105,7 @@ export function createSceneObject(params: {
 
   return {
     id: params.id,
+    name: params.def?.name ?? `Object ${params.id + 1}`,
     pos: basePos,
     scale: params.def?.scale ? vec3.clone(params.def.scale) : vec3.fromValues(1, 1, 1),
     moveSpeed: params.def?.moveSpeed ?? params.objectMoveSpeed,
@@ -117,6 +122,7 @@ export function createSceneObject(params: {
 
 export function lightsToDTO(lights: LightDef[]): LightDTO[] {
   return lights.map((light) => ({
+    name: light.name,
     pos: [light.pos[0], light.pos[1], light.pos[2]],
     type: light.type,
     yaw: light.yaw,
@@ -133,6 +139,7 @@ export function lightsToDTO(lights: LightDef[]): LightDTO[] {
 
 export function objectsToDTO(objects: SceneObject[], defaultMeshId: number): ObjectDTO[] {
   return objects.map((object) => ({
+    name: object.name,
     pos: [object.pos[0], object.pos[1], object.pos[2]],
     scale: [object.scale[0], object.scale[1], object.scale[2]],
     moveSpeed: object.moveSpeed,
@@ -149,6 +156,7 @@ export function objectsToDTO(objects: SceneObject[], defaultMeshId: number): Obj
 
 export function lightsFromDTO(lights: LightDTO[]): LightDef[] {
   return lights.map((light) => ({
+    name: light.name ?? 'Light',
     pos: vec3.fromValues(light.pos[0], light.pos[1], light.pos[2]),
     type: light.type,
     yaw: light.yaw,
@@ -170,6 +178,7 @@ export function lightsFromDTO(lights: LightDTO[]): LightDef[] {
 export function objectsFromDTO(objects: ObjectDTO[], defaultMeshId: number): SceneObject[] {
   return objects.map((object, index) => ({
     id: index,
+    name: object.name ?? `Object ${index + 1}`,
     pos: vec3.fromValues(object.pos[0], object.pos[1], object.pos[2]),
     scale: vec3.fromValues(
       object.scale?.[0] ?? 1,
@@ -200,6 +209,8 @@ export function createSceneDTO(params: {
   wallColor: vec3;
   showFloor: boolean;
   showWalls: boolean;
+  floorSize: number;
+  showGrid: boolean;
   shadowParams: ShadowParamsDTO;
 }): SceneDTO {
   return {
@@ -209,6 +220,8 @@ export function createSceneDTO(params: {
     wallColor: [params.wallColor[0], params.wallColor[1], params.wallColor[2]],
     showFloor: params.showFloor,
     showWalls: params.showWalls,
+    floorSize: params.floorSize,
+    showGrid: params.showGrid,
     shadowParams: { ...params.shadowParams }
   };
 }

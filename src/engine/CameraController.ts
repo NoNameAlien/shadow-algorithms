@@ -26,6 +26,7 @@ export class CameraController {
     private rotateSpeed = 1.5;
     private mouseSensitivity = 0.002;
     private isPointerLocked = false;
+    private orbitKeyboardSuppressed = false;
 
     constructor(canvas: HTMLCanvasElement) {
         this.canvas = canvas;
@@ -71,6 +72,7 @@ export class CameraController {
     private setupHandlers() {
         // Клавиатура
         window.addEventListener('keydown', (e) => {
+            if (this.shouldIgnoreKeyboardEvent(e)) return;
             this.keys.add(e.key.toLowerCase());
             this.keys.add(e.code);
         });
@@ -126,6 +128,19 @@ export class CameraController {
         });
     }
 
+    private shouldIgnoreKeyboardEvent(event: KeyboardEvent) {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return false;
+
+        return Boolean(
+            target.closest('[data-ui-panel="true"]') ||
+            target instanceof HTMLInputElement ||
+            target instanceof HTMLTextAreaElement ||
+            target instanceof HTMLSelectElement ||
+            target instanceof HTMLButtonElement
+        );
+    }
+
     update(deltaTime: number) {
         if (this.mode === 'orbit') {
             this.updateOrbit(deltaTime);
@@ -136,17 +151,19 @@ export class CameraController {
 
     private updateOrbit(deltaTime: number) {
         // WASD/стрелки вращают камеру вокруг центра
-        if (this.keys.has('a') || this.keys.has('arrowleft')) {
-            this.theta += this.rotateSpeed * deltaTime;
-        }
-        if (this.keys.has('d') || this.keys.has('arrowright')) {
-            this.theta -= this.rotateSpeed * deltaTime;
-        }
-        if (this.keys.has('w') || this.keys.has('arrowup')) {
-            this.phi = Math.max(0.1, this.phi - this.rotateSpeed * deltaTime);
-        }
-        if (this.keys.has('s') || this.keys.has('arrowdown')) {
-            this.phi = Math.min(Math.PI - 0.1, this.phi + this.rotateSpeed * deltaTime);
+        if (!this.orbitKeyboardSuppressed) {
+            if (this.keys.has('a') || this.keys.has('arrowleft')) {
+                this.theta += this.rotateSpeed * deltaTime;
+            }
+            if (this.keys.has('d') || this.keys.has('arrowright')) {
+                this.theta -= this.rotateSpeed * deltaTime;
+            }
+            if (this.keys.has('w') || this.keys.has('arrowup')) {
+                this.phi = Math.max(0.1, this.phi - this.rotateSpeed * deltaTime);
+            }
+            if (this.keys.has('s') || this.keys.has('arrowdown')) {
+                this.phi = Math.min(Math.PI - 0.1, this.phi + this.rotateSpeed * deltaTime);
+            }
         }
 
         // Вычисляем позицию из orbit параметров
@@ -251,5 +268,9 @@ export class CameraController {
 
     getMode(): ControlMode {
         return this.mode;
+    }
+
+    setOrbitKeyboardSuppressed(suppressed: boolean) {
+        this.orbitKeyboardSuppressed = suppressed;
     }
 }

@@ -50,7 +50,7 @@ export function AssetsSection({
   onLoadFloorTexture
 }: Props) {
   return (
-    <PanelSection>
+    <PanelSection title={lang === 'ru' ? 'Ассеты' : 'Assets'} defaultCollapsed>
       <label style={{ display: 'block', fontSize: 13, marginBottom: 4, opacity: 0.8 }}>
         {strings.objectTexture}
       </label>

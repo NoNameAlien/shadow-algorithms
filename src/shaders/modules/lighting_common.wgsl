@@ -12,6 +12,7 @@ const LIGHT_DEBUG_DIFFUSE: i32 = 2;
 const LIGHT_DEBUG_SPECULAR: i32 = 3;
 const LIGHT_DEBUG_SHADOW: i32 = 4;
 const LIGHT_DEBUG_NORMALS: i32 = 5;
+const MAX_LIGHTS: u32 = 16u;
 
 struct ShadingParams {
   shadowStrength: f32,
@@ -46,7 +47,7 @@ struct Light {
 struct LightsData {
   count: f32,
   _pad0: vec3<f32>,
-  lights: array<Light, 4>,
+  lights: array<Light, 16>,
 };
 
 struct ShadowSample {
@@ -124,7 +125,7 @@ fn computeLightDirection(light: Light, worldPos: vec3<f32>) -> vec3<f32> {
     return normalize(light.pos - worldPos);
   }
 
-  return normalize(light.pos);
+  return normalize(light.pos - worldPos);
 }
 
 fn computeSpotFactor(light: Light, worldPos: vec3<f32>) -> f32 {

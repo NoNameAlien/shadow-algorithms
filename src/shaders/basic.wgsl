@@ -76,7 +76,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     var isShadowed = false;
     var lightIndex = -1;
 
-    if (receive > 0.5 && objParams.spec.z > 0.5) {
+    if (receive > 0.5) {
       if (i == caster0) {
         isShadowed = true;
         lightIndex = 0;

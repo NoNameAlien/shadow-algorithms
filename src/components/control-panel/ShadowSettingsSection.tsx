@@ -1,7 +1,7 @@
 import { SHADOW_METHODS } from './constants';
-import { RangeControl, SelectControl } from './FormControls';
+import { HelpMark, RangeControl, SelectControl } from './FormControls';
 import { PanelSection } from './PanelSection';
-import { colorInputStyle } from './styles';
+import { colorInputStyle, subtleButtonStyle } from './styles';
 import type { ControlPanelStrings, ShadowParams } from './types';
 
 type Props = {
@@ -23,6 +23,7 @@ const hexToRgb = (hex: string): [number, number, number] => {
 };
 
 export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
+  const isRu = strings.title === 'Настройки теней';
   const isPCF = params.method === 'PCF';
   const isPCSS = params.method === 'PCSS';
   const isVSM = params.method === 'VSM';
@@ -30,48 +31,40 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
     ? 'primary'
     : params.debugShadowMap ?? 'off';
   const shadowDebugOptions = [
-    { value: 'off' as const, label: 'Off' },
+    { value: 'off' as const, label: isRu ? 'Выкл.' : 'Off' },
     {
       value: 'primary' as const,
       label: isVSM ? 'VSM moments' : 'Primary depth'
     },
-    ...(params.method === 'SM' ? [{ value: 'secondary' as const, label: 'Secondary depth' }] : [])
+    ...(params.method === 'SM' ? [{ value: 'secondary' as const, label: isRu ? 'Вторая depth-карта' : 'Secondary depth' }] : [])
   ];
   const lightDebugOptions = [
-    { value: 'final' as const, label: 'Final' },
-    { value: 'lighting' as const, label: 'Lighting only' },
-    { value: 'diffuse' as const, label: 'Diffuse' },
-    { value: 'specular' as const, label: 'Specular' },
-    { value: 'shadow' as const, label: 'Shadow mask' },
-    { value: 'normals' as const, label: 'Normals' }
+    { value: 'final' as const, label: isRu ? 'Итоговый вид' : 'Final' },
+    { value: 'lighting' as const, label: isRu ? 'Только освещение' : 'Lighting only' },
+    { value: 'diffuse' as const, label: isRu ? 'Диффузный свет' : 'Diffuse' },
+    { value: 'specular' as const, label: isRu ? 'Блики' : 'Specular' },
+    { value: 'shadow' as const, label: isRu ? 'Маска теней' : 'Shadow mask' },
+    { value: 'normals' as const, label: isRu ? 'Нормали' : 'Normals' }
   ];
   const qualityPresets = [
-    { label: 'Low', params: { shadowMapSize: 1024, bias: 0.006, pcfRadius: 1.5, pcfSamples: 4, pcssBlockerSearchSamples: 8, vsmLightBleedReduction: 0.5 } },
-    { label: 'Medium', params: { shadowMapSize: 2048, bias: 0.003, pcfRadius: 2.5, pcfSamples: 8, pcssBlockerSearchSamples: 8, vsmLightBleedReduction: 0.4 } },
-    { label: 'High', params: { shadowMapSize: 3072, bias: 0.002, pcfRadius: 3, pcfSamples: 16, pcssBlockerSearchSamples: 16, vsmLightBleedReduction: 0.35 } },
-    { label: 'Ultra', params: { shadowMapSize: 4096, bias: 0.0015, pcfRadius: 4, pcfSamples: 32, pcssBlockerSearchSamples: 32, vsmLightBleedReduction: 0.3 } }
+    { label: isRu ? 'Низк.' : 'Low', params: { shadowMapSize: 1024, bias: 0.006, pcfRadius: 1.5, pcfSamples: 4, pcssBlockerSearchSamples: 8, vsmLightBleedReduction: 0.5 } },
+    { label: isRu ? 'Сред.' : 'Medium', params: { shadowMapSize: 2048, bias: 0.003, pcfRadius: 2.5, pcfSamples: 8, pcssBlockerSearchSamples: 8, vsmLightBleedReduction: 0.4 } },
+    { label: isRu ? 'Выс.' : 'High', params: { shadowMapSize: 3072, bias: 0.002, pcfRadius: 3, pcfSamples: 16, pcssBlockerSearchSamples: 16, vsmLightBleedReduction: 0.35 } },
+    { label: isRu ? 'Ультра' : 'Ultra', params: { shadowMapSize: 4096, bias: 0.0015, pcfRadius: 4, pcfSamples: 32, pcssBlockerSearchSamples: 32, vsmLightBleedReduction: 0.3 } }
   ];
 
   return (
     <>
-      <PanelSection>
+      <PanelSection title={strings.methodLabel.replace(':', '')} collapsible={false}>
         <SelectControl
           label={strings.methodLabel}
+          help={isRu ? 'Алгоритм расчета теней для текущей сцены.' : 'Shadow algorithm used for the current scene.'}
           value={params.method}
           options={SHADOW_METHODS.map((method) => ({
             value: method,
             label: method === 'SM' ? 'Shadow Mapping' : method
           }))}
           onChange={(method) => onUpdate({ method })}
-        />
-
-        <RangeControl
-          label={`${strings.shadowMapSize}: ${params.shadowMapSize}`}
-          min="512"
-          max="4096"
-          step="512"
-          value={params.shadowMapSize}
-          onChange={(shadowMapSize) => onUpdate({ shadowMapSize })}
         />
 
         <div style={{ marginBottom: 8 }}>
@@ -82,17 +75,30 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
                 key={preset.label}
                 type="button"
                 onClick={() => onUpdate(preset.params)}
-                style={{ padding: '4px 5px', fontSize: 11, borderRadius: 5, border: '1px solid #343b4a', background: '#252a34', color: '#e6e6e6', cursor: 'pointer' }}
+                style={{ ...subtleButtonStyle, padding: '4px 5px', fontSize: 11 }}
               >
                 {preset.label}
               </button>
             ))}
           </div>
         </div>
+      </PanelSection>
+
+      <PanelSection title={isRu ? 'Детали метода' : 'Method details'} defaultCollapsed>
+        <RangeControl
+          label={`${strings.shadowMapSize}: ${params.shadowMapSize}`}
+          help={isRu ? 'Разрешение shadow map: выше четче, но тяжелее для GPU.' : 'Shadow map resolution: sharper but heavier on the GPU.'}
+          min="512"
+          max="4096"
+          step="512"
+          value={params.shadowMapSize}
+          onChange={(shadowMapSize) => onUpdate({ shadowMapSize })}
+        />
 
         {!isVSM && (
           <RangeControl
             label={`${strings.bias}: ${params.bias.toFixed(4)}`}
+            help={isRu ? 'Сдвиг глубины против acne-артефактов; слишком высокий отрывает тень.' : 'Depth offset against acne artifacts; too high detaches shadows.'}
             min="0.001"
             max="0.02"
             step="0.001"
@@ -105,6 +111,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
           <>
             <RangeControl
               label={`${strings.pcfRadius}: ${params.pcfRadius?.toFixed(1)} texels`}
+              help={isRu ? 'Радиус размытия PCF в texel shadow map.' : 'PCF blur radius in shadow-map texels.'}
               min="0.5"
               max="5.0"
               step="0.5"
@@ -114,6 +121,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
 
             <SelectControl
               label={`${strings.pcfSamples}: ${params.pcfSamples}`}
+              help={isRu ? 'Количество выборок PCF: мягче и дороже при росте.' : 'PCF sample count: softer and more expensive when raised.'}
               value={params.pcfSamples ?? 8}
               options={[4, 8, 16, 32].map((value) => ({ value, label: String(value) }))}
               onChange={(pcfSamples) => onUpdate({ pcfSamples })}
@@ -125,6 +133,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
           <>
             <RangeControl
               label={`${strings.pcssLightSize}: ${params.pcssLightSize?.toFixed(3)}`}
+              help={isRu ? 'Виртуальный размер источника для мягких контактных теней PCSS.' : 'Virtual light size for PCSS contact-softening shadows.'}
               min="0.01"
               max="0.2"
               step="0.01"
@@ -134,6 +143,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
 
             <SelectControl
               label={`${strings.pcssBlockerSamples}: ${params.pcssBlockerSearchSamples}`}
+              help={isRu ? 'Сколько выборок искать препятствия перед фильтрацией PCSS.' : 'How many samples search blockers before PCSS filtering.'}
               value={params.pcssBlockerSearchSamples ?? 8}
               options={[8, 16, 32].map((value) => ({ value, label: String(value) }))}
               onChange={(pcssBlockerSearchSamples) => onUpdate({ pcssBlockerSearchSamples })}
@@ -146,6 +156,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
           <>
             <RangeControl
               label={`${strings.vsmMinVariance}: ${params.vsmMinVariance?.toExponential(2)}`}
+              help={isRu ? 'Минимальная дисперсия VSM против шумов и протечек.' : 'Minimum VSM variance against noise and light leaking.'}
               min="-6"
               max="-3"
               step="0.1"
@@ -155,6 +166,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
 
             <RangeControl
               label={`${strings.vsmLightBleed}: ${params.vsmLightBleedReduction?.toFixed(2)}`}
+              help={isRu ? 'Подавление протечки света в VSM.' : 'Light bleeding reduction for VSM.'}
               min="0.0"
               max="0.8"
               step="0.05"
@@ -166,9 +178,10 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
         )}
       </PanelSection>
 
-      <PanelSection>
+      <PanelSection title={isRu ? 'Свет, окружение и отладка' : 'Lighting, environment & debug'} defaultCollapsed>
         <RangeControl
           label={`${strings.shadowStrength} (×${(params.shadowStrength ?? 1.0).toFixed(2)})`}
+          help={isRu ? 'Итоговая сила затемнения от теней.' : 'Final darkening strength from shadows.'}
           min="0.0"
           max="2.0"
           step="0.05"
@@ -178,6 +191,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
 
         <RangeControl
           label={`${strings.ambientStrength}: ${(params.ambientStrength ?? 0.4).toFixed(2)}`}
+          help={isRu ? 'Фоновая подсветка, которая смягчает полностью темные зоны.' : 'Ambient fill that softens fully dark areas.'}
           min="0.0"
           max="0.8"
           step="0.02"
@@ -187,6 +201,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
 
         <RangeControl
           label={`${strings.exposure}: ${(params.exposure ?? 0.9).toFixed(2)}`}
+          help={isRu ? 'Общая яркость итогового изображения.' : 'Overall brightness of the final image.'}
           min="0.4"
           max="1.5"
           step="0.05"
@@ -194,28 +209,31 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
           onChange={(exposure) => onUpdate({ exposure })}
         />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 13 }}>{strings.skyAmbient}</span>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 13 }}>
           <input
             type="color"
             value={rgbToHex(params.hemisphereSkyColor ?? [0.62, 0.68, 0.78])}
             onChange={(event) => onUpdate({ hemisphereSkyColor: hexToRgb(event.target.value) })}
             style={colorInputStyle}
           />
-        </div>
+          {strings.skyAmbient}
+          <HelpMark text={isRu ? 'Цвет верхней полусферы фонового освещения.' : 'Color of the upper hemisphere ambient light.'} />
+        </label>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <span style={{ fontSize: 13 }}>{strings.groundAmbient}</span>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 }}>
           <input
             type="color"
             value={rgbToHex(params.hemisphereGroundColor ?? [0.18, 0.16, 0.14])}
             onChange={(event) => onUpdate({ hemisphereGroundColor: hexToRgb(event.target.value) })}
             style={colorInputStyle}
           />
-        </div>
+          {strings.groundAmbient}
+          <HelpMark text={isRu ? 'Цвет нижней полусферы фонового освещения.' : 'Color of the lower hemisphere ambient light.'} />
+        </label>
 
         <SelectControl
           label={strings.lightDebugMode}
+          help={isRu ? 'Показывает отдельные составляющие освещения для отладки.' : 'Shows separate lighting components for debugging.'}
           value={params.lightDebugMode ?? 'final'}
           options={lightDebugOptions}
           onChange={(lightDebugMode) => onUpdate({ lightDebugMode })}
@@ -223,6 +241,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
 
         <SelectControl
           label={strings.shadowDebug}
+          help={isRu ? 'Выводит shadow map или VSM moments поверх сцены.' : 'Displays shadow map or VSM moments over the scene.'}
           value={debugShadowMap}
           options={shadowDebugOptions}
           onChange={(debugShadowMap) => onUpdate({ debugShadowMap })}

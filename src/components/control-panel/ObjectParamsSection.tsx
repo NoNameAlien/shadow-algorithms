@@ -1,6 +1,7 @@
-import { colorInputStyle } from './styles';
+import { useState, type ReactNode } from 'react';
+import { colorInputStyle, subtleButtonStyle } from './styles';
 import type { Lang, MeshOption } from './types';
-import { RangeControl, SelectControl } from './FormControls';
+import { HelpMark, RangeControl, SelectControl } from './FormControls';
 import { PanelSection } from './PanelSection';
 
 const MATERIAL_PRESETS = [
@@ -17,6 +18,7 @@ type Props = {
   objectSpecular: number;
   objectShininess: number;
   objectRoughness: number;
+  objectMoveSpeed: number;
   objectCastShadows: boolean;
   objectReceiveShadows: boolean;
   objectSelfShadows: boolean;
@@ -25,10 +27,49 @@ type Props = {
   onObjectSpecularChange: (value: number) => void;
   onObjectShininessChange: (value: number) => void;
   onObjectRoughnessChange: (value: number) => void;
+  onObjectMoveSpeedChange: (value: number) => void;
   onObjectCastShadowsChange: (value: boolean) => void;
   onObjectReceiveShadowsChange: (value: boolean) => void;
   onObjectSelfShadowsChange: (value: boolean) => void;
 };
+
+function DetailToggle({
+  title,
+  open,
+  onToggle,
+  children
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #2a303c' }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          width: '100%',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: 0,
+          background: 'transparent',
+          color: '#e6e6e6',
+          border: 'none',
+          cursor: 'pointer',
+          fontSize: 13,
+          fontWeight: 600
+        }}
+      >
+        <span style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}>{title}</span>
+        <span>{open ? '▴' : '▾'}</span>
+      </button>
+      {open ? <div style={{ marginTop: 8 }}>{children}</div> : null}
+    </div>
+  );
+}
 
 export function ObjectParamsSection({
   lang,
@@ -38,6 +79,7 @@ export function ObjectParamsSection({
   objectSpecular,
   objectShininess,
   objectRoughness,
+  objectMoveSpeed,
   objectCastShadows,
   objectReceiveShadows,
   objectSelfShadows,
@@ -46,35 +88,37 @@ export function ObjectParamsSection({
   onObjectSpecularChange,
   onObjectShininessChange,
   onObjectRoughnessChange,
+  onObjectMoveSpeedChange,
   onObjectCastShadowsChange,
   onObjectReceiveShadowsChange,
   onObjectSelfShadowsChange
 }: Props) {
-  return (
-    <PanelSection>
-      <div style={{ fontSize: 13, marginBottom: 6, opacity: 0.85 }}>
-        {lang === 'ru' ? 'Параметры объекта' : 'Object params'}
-      </div>
+  const [materialOpen, setMaterialOpen] = useState(false);
+  const [motionOpen, setMotionOpen] = useState(false);
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <span style={{ fontSize: 13 }}>{lang === 'ru' ? 'Цвет объекта' : 'Object color'}</span>
+  return (
+    <PanelSection title={lang === 'ru' ? 'Параметры объекта' : 'Object params'} collapsible={false}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 13 }}>
         <input
           type="color"
           value={objectColor}
           onChange={(event) => onObjectColorChange(event.target.value)}
           style={colorInputStyle}
         />
-      </div>
+        {lang === 'ru' ? 'Цвет объекта' : 'Object color'}
+        <HelpMark text={lang === 'ru' ? 'Базовый цвет активного объекта.' : 'Base color of the active object.'} />
+      </label>
 
       <SelectControl
         label={lang === 'ru' ? 'Модель объекта' : 'Object model'}
+        help={lang === 'ru' ? 'Переключает геометрию активного объекта без удаления его настроек.' : 'Switches active object geometry without removing its settings.'}
         value={activeMeshId}
         options={meshOptions.map((mesh) => ({ value: mesh.id, label: mesh.name || `Mesh ${mesh.id}` }))}
         onChange={onObjectMeshChange}
         marginBottom={6}
       />
 
-      <div style={{ marginBottom: 8 }}>
+      <div style={{ marginBottom: 0 }}>
         <div style={{ fontSize: 13, marginBottom: 5, opacity: 0.85 }}>
           {lang === 'ru' ? 'Пресет материала' : 'Material preset'}
         </div>
@@ -88,13 +132,9 @@ export function ObjectParamsSection({
                 onObjectRoughnessChange(preset.roughness);
               }}
               style={{
+                ...subtleButtonStyle,
                 padding: '4px 6px',
-                fontSize: 12,
-                borderRadius: 6,
-                border: '1px solid #343b4a',
-                background: '#252a34',
-                color: '#e6e6e6',
-                cursor: 'pointer'
+                fontSize: 12
               }}
             >
               {lang === 'ru' ? preset.ru : preset.en}
@@ -103,68 +143,97 @@ export function ObjectParamsSection({
         </div>
       </div>
 
-      <RangeControl
-        label={
-          lang === 'ru'
-            ? `Сила блика: ${objectSpecular.toFixed(2)}`
-            : `Specular strength: ${objectSpecular.toFixed(2)}`
-        }
-        min={0}
-        max={2}
-        step={0.05}
-        value={objectSpecular}
-        onChange={onObjectSpecularChange}
-        marginBottom={6}
-      />
-
-      <RangeControl
-        label={
-          lang === 'ru'
-            ? `Шероховатость: ${objectRoughness.toFixed(2)}`
-            : `Roughness: ${objectRoughness.toFixed(2)}`
-        }
-        min={0.02}
-        max={1}
-        step={0.02}
-        value={objectRoughness}
-        onChange={onObjectRoughnessChange}
-        marginBottom={6}
-      />
-
-      <RangeControl
-        label={lang === 'ru' ? `Shininess: ${objectShininess.toFixed(0)}` : `Legacy shininess: ${objectShininess.toFixed(0)}`}
-        min={4}
-        max={128}
-        step={1}
-        value={objectShininess}
-        onChange={onObjectShininessChange}
-        marginBottom={6}
-      />
-
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4 }}>
-        <input
-          type="checkbox"
-          checked={objectCastShadows}
-          onChange={(event) => onObjectCastShadowsChange(event.target.checked)}
+      <DetailToggle
+        title={lang === 'ru' ? 'Детали материала' : 'Material details'}
+        open={materialOpen}
+        onToggle={() => setMaterialOpen((previous) => !previous)}
+      >
+        <RangeControl
+          label={
+            lang === 'ru'
+              ? `Сила блика: ${objectSpecular.toFixed(2)}`
+              : `Specular strength: ${objectSpecular.toFixed(2)}`
+          }
+          help={lang === 'ru' ? 'Насколько ярко материал отражает источник света.' : 'How strongly the material reflects direct light.'}
+          min={0}
+          max={2}
+          step={0.05}
+          value={objectSpecular}
+          onChange={onObjectSpecularChange}
+          marginBottom={6}
         />
-        {lang === 'ru' ? 'Кидать тени' : 'Cast shadows'}
-      </label>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4 }}>
-        <input
-          type="checkbox"
-          checked={objectReceiveShadows}
-          onChange={(event) => onObjectReceiveShadowsChange(event.target.checked)}
+
+        <RangeControl
+          label={
+            lang === 'ru'
+              ? `Шероховатость: ${objectRoughness.toFixed(2)}`
+              : `Roughness: ${objectRoughness.toFixed(2)}`
+          }
+          help={lang === 'ru' ? 'Высокая шероховатость делает блик мягче и шире.' : 'Higher roughness makes highlights softer and wider.'}
+          min={0.02}
+          max={1}
+          step={0.02}
+          value={objectRoughness}
+          onChange={onObjectRoughnessChange}
+          marginBottom={6}
         />
-        {lang === 'ru' ? 'Принимать тени на объект' : 'Receive shadows on object'}
-      </label>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-        <input
-          type="checkbox"
-          checked={objectSelfShadows}
-          onChange={(event) => onObjectSelfShadowsChange(event.target.checked)}
+
+        <RangeControl
+          label={lang === 'ru' ? `Shininess: ${objectShininess.toFixed(0)}` : `Legacy shininess: ${objectShininess.toFixed(0)}`}
+          help={lang === 'ru' ? 'Совместимый параметр резкости блика для старой модели освещения.' : 'Compatibility highlight sharpness value for the legacy lighting model.'}
+          min={4}
+          max={128}
+          step={1}
+          value={objectShininess}
+          onChange={onObjectShininessChange}
+          marginBottom={6}
         />
-        {lang === 'ru' ? 'Самозатенение объекта' : 'Object self shadows'}
-      </label>
+      </DetailToggle>
+
+      <DetailToggle
+        title={lang === 'ru' ? 'Движение и тени' : 'Motion & shadows'}
+        open={motionOpen}
+        onToggle={() => setMotionOpen((previous) => !previous)}
+      >
+        <RangeControl
+          label={lang === 'ru' ? `Скорость объекта: ${objectMoveSpeed.toFixed(2)}` : `Object speed: ${objectMoveSpeed.toFixed(2)}`}
+          help={lang === 'ru' ? 'Скорость перемещения выбранного объекта или света с клавиатуры.' : 'Keyboard movement speed for the selected object or light.'}
+          min="0.2"
+          max="3.0"
+          step="0.1"
+          value={objectMoveSpeed}
+          onChange={onObjectMoveSpeedChange}
+          marginBottom={8}
+        />
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4 }}>
+          <input
+            type="checkbox"
+            checked={objectCastShadows}
+            onChange={(event) => onObjectCastShadowsChange(event.target.checked)}
+          />
+          {lang === 'ru' ? 'Кидать тени' : 'Cast shadows'}
+          <HelpMark text={lang === 'ru' ? 'Объект будет попадать в shadow map и отбрасывать тень.' : 'Object is written into shadow maps and casts a shadow.'} />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4 }}>
+          <input
+            type="checkbox"
+            checked={objectReceiveShadows}
+            onChange={(event) => onObjectReceiveShadowsChange(event.target.checked)}
+          />
+          {lang === 'ru' ? 'Принимать тени на объект' : 'Receive shadows on object'}
+          <HelpMark text={lang === 'ru' ? 'Позволяет другим объектам затемнять поверхность активного объекта.' : 'Allows other objects to darken the active object surface.'} />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={objectSelfShadows}
+            onChange={(event) => onObjectSelfShadowsChange(event.target.checked)}
+          />
+          {lang === 'ru' ? 'Самозатенение объекта' : 'Object self shadows'}
+          <HelpMark text={lang === 'ru' ? 'Объект может затенять собственные поверхности.' : 'The object can shadow its own surfaces.'} />
+        </label>
+      </DetailToggle>
     </PanelSection>
   );
 }

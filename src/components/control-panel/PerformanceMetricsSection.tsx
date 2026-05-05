@@ -25,10 +25,12 @@ const EMPTY_METRICS: PerformanceMetrics = {
 
 const metricBoxStyle = {
   padding: '6px 8px',
-  background: '#202531',
+  background: '#252a34',
   border: '1px solid #343b4a',
   borderRadius: 6
 };
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
 export function PerformanceMetricsSection({
   lang,
@@ -40,18 +42,23 @@ export function PerformanceMetricsSection({
   const [collapsed, setCollapsed] = useState(false);
   const history = metrics.frameTimeHistory.slice(-60);
   const graphMax = Math.max(33.3, ...history);
+  const fpsRatio = clamp01(metrics.fps / 60);
+  const frameRatio = clamp01(metrics.frameTimeMs / 33.3);
 
   return (
     <div
       style={{
         padding: 10,
         marginBottom: floating ? 0 : 8,
-        background: floating ? 'rgba(20, 22, 26, 0.88)' : '#1a1d23',
-        border: '1px solid #303641',
+        background: floating ? 'rgba(30, 34, 43, 0.9)' : '#1e222b',
+        border: '1px solid #262a32',
         borderRadius: 6,
         boxShadow: floating ? '0 8px 24px rgba(0, 0, 0, 0.28)' : undefined,
         backdropFilter: floating ? 'blur(8px)' : undefined,
-        width: floating ? 280 : undefined
+        width: floating ? 300 : undefined,
+        boxSizing: 'border-box',
+        color: '#e6e6e6',
+        fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
       }}
     >
       <div
@@ -67,6 +74,7 @@ export function PerformanceMetricsSection({
           onClick={() => setCollapsed((previous) => !previous)}
           title={collapsed ? (lang === 'ru' ? 'Развернуть' : 'Expand') : lang === 'ru' ? 'Свернуть' : 'Collapse'}
           style={{
+            order: 1,
             flex: 1,
             display: 'flex',
             alignItems: 'center',
@@ -83,7 +91,7 @@ export function PerformanceMetricsSection({
           }}
         >
           <span>{lang === 'ru' ? 'Метрики производительности' : 'Performance metrics'}</span>
-          <span style={{ fontSize: 16, lineHeight: 1 }}>{collapsed ? '+' : '-'}</span>
+          <span style={{ fontSize: 14, lineHeight: 1 }}>{collapsed ? '▾' : '▴'}</span>
         </button>
 
         {!collapsed && (
@@ -92,6 +100,7 @@ export function PerformanceMetricsSection({
             onClick={onReset}
             disabled={!onReset}
             style={{
+              order: 0,
               padding: '3px 6px',
               background: '#343b4a',
               color: '#e6e6e6',
@@ -120,17 +129,23 @@ export function PerformanceMetricsSection({
             <div style={metricBoxStyle}>
               <div style={{ opacity: 0.65 }}>{strings.fpsLabel}</div>
               <div style={{ fontSize: 18, fontWeight: 700 }}>{metrics.fps}</div>
+              <div style={{ height: 4, marginTop: 5, background: '#181b20', borderRadius: 999, overflow: 'hidden' }}>
+                <div style={{ width: `${fpsRatio * 100}%`, height: '100%', background: fpsRatio > 0.8 ? '#51cf66' : fpsRatio > 0.45 ? '#fcc419' : '#ff6b6b' }} />
+              </div>
             </div>
             <div style={metricBoxStyle}>
-              <div style={{ opacity: 0.65 }}>{lang === 'ru' ? 'Frame time' : 'Frame time'}</div>
+              <div style={{ opacity: 0.65 }}>{lang === 'ru' ? 'Время кадра' : 'Frame time'}</div>
               <div style={{ fontSize: 18, fontWeight: 700 }}>{metrics.frameTimeMs.toFixed(1)} ms</div>
+              <div style={{ height: 4, marginTop: 5, background: '#181b20', borderRadius: 999, overflow: 'hidden' }}>
+                <div style={{ width: `${frameRatio * 100}%`, height: '100%', background: frameRatio < 0.52 ? '#51cf66' : frameRatio < 1 ? '#fcc419' : '#ff6b6b' }} />
+              </div>
             </div>
             <div style={metricBoxStyle}>
-              <div style={{ opacity: 0.65 }}>{lang === 'ru' ? 'Средний FPS за сессию' : 'Session avg FPS'}</div>
+              <div style={{ opacity: 0.65 }}>{lang === 'ru' ? 'Средний FPS' : 'Session avg FPS'}</div>
               <div style={{ fontWeight: 700 }}>{metrics.averageFps}</div>
             </div>
             <div style={metricBoxStyle}>
-              <div style={{ opacity: 0.65 }}>{lang === 'ru' ? 'FPS сессии min/max' : 'Session min/max FPS'}</div>
+              <div style={{ opacity: 0.65 }}>{lang === 'ru' ? 'FPS min/max' : 'Session min/max FPS'}</div>
               <div style={{ fontWeight: 700 }}>
                 {metrics.sessionMinFps} / {metrics.sessionMaxFps}
               </div>
@@ -138,9 +153,13 @@ export function PerformanceMetricsSection({
           </div>
 
           <div style={{ marginBottom: 6, fontSize: 12, opacity: 0.68 }}>
-            {lang === 'ru' ? 'Recent min/max FPS' : 'Recent min/max FPS'}: {metrics.recentMinFps} /{' '}
+            {lang === 'ru' ? 'Недавний min/max FPS' : 'Recent min/max FPS'}: {metrics.recentMinFps} /{' '}
             {metrics.recentMaxFps}
-            {metrics.sampleDurationMs > 0 ? ` · ${Math.round(metrics.sampleDurationMs)} ms sample` : ''}
+            {metrics.sampleDurationMs > 0
+              ? lang === 'ru'
+                ? ` · выборка ${Math.round(metrics.sampleDurationMs)} ms`
+                : ` · ${Math.round(metrics.sampleDurationMs)} ms sample`
+              : ''}
           </div>
 
           <div
@@ -176,8 +195,8 @@ export function PerformanceMetricsSection({
           </div>
 
           <div style={{ marginTop: 6, fontSize: 12, opacity: 0.68 }}>
-            {lang === 'ru' ? 'Frame avg' : 'Frame avg'}: {metrics.averageFrameTimeMs.toFixed(1)} ms ·{' '}
-            {lang === 'ru' ? 'Frame max' : 'Frame max'}: {metrics.maxFrameTimeMs.toFixed(1)} ms
+            {lang === 'ru' ? 'Среднее время кадра' : 'Frame avg'}: {metrics.averageFrameTimeMs.toFixed(1)} ms ·{' '}
+            {lang === 'ru' ? 'Макс.' : 'Frame max'}: {metrics.maxFrameTimeMs.toFixed(1)} ms
           </div>
         </>
       )}

@@ -35,13 +35,19 @@ export function Header({ autoRotate, lang, method, strings, onLanguageChange, on
           type="button"
           onClick={onToggleAutoRotate}
           style={{
-            padding: '3px 8px',
+            width: 30,
+            height: 30,
+            padding: 0,
             fontSize: 13,
-            borderRadius: 999,
+            lineHeight: 1,
+            borderRadius: 6,
             border: '1px solid #333948',
-            background: autoRotate ? '#202531' : '#2f9e44',
+            background: '#202531',
             color: '#e6e6e6',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}
           title={
             lang === 'ru'
