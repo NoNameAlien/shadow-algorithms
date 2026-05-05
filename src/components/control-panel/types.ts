@@ -1,4 +1,5 @@
 import type { PerformanceMetrics } from '../../engine/types';
+import type { ScenePresetId } from '../../engine/presets';
 
 export type { PerformanceMetrics };
 
@@ -7,6 +8,7 @@ export type LightMode = 'sun' | 'spot' | 'top';
 export type ShadowMethod = 'SM' | 'PCF' | 'PCSS' | 'VSM';
 export type ShadowDebugMode = 'off' | 'primary' | 'secondary';
 export type LightDebugMode = 'final' | 'lighting' | 'diffuse' | 'specular' | 'shadow' | 'normals';
+export type ScenePresetSelection = 'custom' | ScenePresetId;
 
 export type ShadowParams = {
   shadowMapSize: number;
@@ -36,6 +38,8 @@ export type ControlPanelProps = {
   onResetScene?: () => void;
   onResetModel?: () => void;
   onLightingPreset?: () => void;
+  activeScenePreset: ScenePresetSelection;
+  onScenePresetChange: (presetId: ScenePresetId) => void;
   isPointerLocked?: boolean;
   lightMode: LightMode;
   onLightModeChange: (mode: LightMode) => void;

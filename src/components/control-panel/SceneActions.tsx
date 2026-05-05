@@ -1,11 +1,15 @@
 import type { RefObject } from 'react';
-import type { Lang } from './types';
+import { SCENE_PRESET_OPTIONS, type ScenePresetId } from '../../engine/presets';
+import { SelectControl } from './FormControls';
+import type { Lang, ScenePresetSelection } from './types';
 
 type Props = {
   lang: Lang;
   sceneFileInputRef: RefObject<HTMLInputElement | null>;
   onSaveScene?: () => void;
   onLoadSceneFile?: (file: File) => void;
+  activeScenePreset: ScenePresetSelection;
+  onScenePresetChange: (presetId: ScenePresetId) => void;
   onExportCsv?: () => void;
   onExportPdf?: () => void;
   onExportScreenshot?: () => void;
@@ -16,6 +20,8 @@ export function SceneActions({
   sceneFileInputRef,
   onSaveScene,
   onLoadSceneFile,
+  activeScenePreset,
+  onScenePresetChange,
   onExportCsv,
   onExportPdf,
   onExportScreenshot
@@ -32,6 +38,21 @@ export function SceneActions({
 
   return (
     <div style={{ marginBottom: 8 }}>
+      <SelectControl
+        label={lang === 'ru' ? 'Preset сцена' : 'Scene preset'}
+        value={activeScenePreset}
+        options={[
+          { value: 'custom' as const, label: lang === 'ru' ? 'Пользовательская' : 'Custom' },
+          ...SCENE_PRESET_OPTIONS.map((preset) => ({
+            value: preset.id,
+            label: preset.label[lang]
+          }))
+        ]}
+        onChange={(value) => {
+          if (value !== 'custom') onScenePresetChange(value);
+        }}
+        marginBottom={8}
+      />
       <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
       <button
         type="button"

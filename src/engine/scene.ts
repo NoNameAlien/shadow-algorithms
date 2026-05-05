@@ -51,6 +51,7 @@ export function createDefaultObjects(defaultMeshId: number): SceneObject[] {
     {
       id: 0,
       pos: vec3.fromValues(0, 0, 0),
+      scale: vec3.fromValues(1, 1, 1),
       moveSpeed: 1.0,
       color: vec3.fromValues(1.0, 1.0, 1.0),
       castShadows: true,
@@ -101,6 +102,7 @@ export function createSceneObject(params: {
   return {
     id: params.id,
     pos: basePos,
+    scale: params.def?.scale ? vec3.clone(params.def.scale) : vec3.fromValues(1, 1, 1),
     moveSpeed: params.def?.moveSpeed ?? params.objectMoveSpeed,
     color: params.def?.color ? vec3.clone(params.def.color) : vec3.fromValues(1.0, 1.0, 1.0),
     castShadows: params.def?.castShadows ?? true,
@@ -132,6 +134,7 @@ export function lightsToDTO(lights: LightDef[]): LightDTO[] {
 export function objectsToDTO(objects: SceneObject[], defaultMeshId: number): ObjectDTO[] {
   return objects.map((object) => ({
     pos: [object.pos[0], object.pos[1], object.pos[2]],
+    scale: [object.scale[0], object.scale[1], object.scale[2]],
     moveSpeed: object.moveSpeed,
     color: [object.color[0], object.color[1], object.color[2]],
     castShadows: object.castShadows,
@@ -168,6 +171,11 @@ export function objectsFromDTO(objects: ObjectDTO[], defaultMeshId: number): Sce
   return objects.map((object, index) => ({
     id: index,
     pos: vec3.fromValues(object.pos[0], object.pos[1], object.pos[2]),
+    scale: vec3.fromValues(
+      object.scale?.[0] ?? 1,
+      object.scale?.[1] ?? 1,
+      object.scale?.[2] ?? 1
+    ),
     moveSpeed: object.moveSpeed,
     color: vec3.fromValues(
       object.color?.[0] ?? 1.0,

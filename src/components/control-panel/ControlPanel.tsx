@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { INITIAL_PARAMS, STRINGS } from './constants';
+import { SCENE_PRESETS } from '../../engine/presets';
 import { Header } from './Header';
 import { HintsSection } from './HintsSection';
 import { LightControls } from './LightControls';
@@ -15,6 +16,8 @@ export function ControlPanel({
   onResetScene,
   onResetModel,
   onLightingPreset,
+  activeScenePreset,
+  onScenePresetChange,
   onLoadObjectTexture,
   onLoadFloorTexture,
   isPointerLocked = false,
@@ -134,6 +137,19 @@ export function ControlPanel({
     onLightingPreset?.();
   };
 
+  const handleScenePresetChange = (presetId: keyof typeof SCENE_PRESETS) => {
+    const preset = SCENE_PRESETS[presetId];
+    if (preset.shadowMethod) {
+      const nextParams: ShadowParams = {
+        ...params,
+        method: preset.shadowMethod
+      };
+      setParams(nextParams);
+      onParamsChange(nextParams);
+    }
+    onScenePresetChange(presetId);
+  };
+
   return (
     <div style={panelStyle}>
       <Header
@@ -225,6 +241,8 @@ export function ControlPanel({
         onResetModel={onResetModel}
         onLoadObjectTexture={onLoadObjectTexture}
         onLoadFloorTexture={onLoadFloorTexture}
+        activeScenePreset={activeScenePreset}
+        onScenePresetChange={handleScenePresetChange}
         onSaveScene={onSaveScene}
         onLoadSceneFile={onLoadSceneFile}
         onExportCsv={onExportCsv}

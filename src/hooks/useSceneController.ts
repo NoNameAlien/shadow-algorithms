@@ -4,6 +4,8 @@ import type { ShadowParams } from '../components/ControlPanel';
 import type { LightScreenPosition } from '../components/SceneViewport';
 import { hexToRgb01, rgb01ToHex } from '../utils/color';
 import { downloadJsonFile, readJsonFile } from '../utils/sceneFile';
+import { SCENE_PRESETS, type ScenePresetId } from '../engine/presets';
+import type { ScenePresetSelection } from '../components/control-panel/types';
 
 type Lang = 'en' | 'ru';
 type MeshOption = { id: number; name: string };
@@ -115,6 +117,7 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   const [meshOptions, setMeshOptions] = useState<MeshOption[]>([]);
   const [lightState, setLightState] = useState<LightPanelState>(DEFAULT_LIGHT_STATE);
   const [objectState, setObjectState] = useState<ObjectPanelState>(DEFAULT_OBJECT_STATE);
+  const [activeScenePreset, setActiveScenePreset] = useState<ScenePresetSelection>('custom');
 
   const syncFromRenderer = useCallback(() => {
     const renderer = rendererRef.current;
@@ -170,6 +173,7 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
 
   const handleLoadModel = async (file: File) => {
     await rendererRef.current?.loadModel(file);
+    setActiveScenePreset('custom');
     syncFromRenderer();
   };
 
@@ -179,10 +183,23 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
 
   const handleResetScene = () => {
     runRendererCommand((renderer) => renderer.resetScene());
+    setActiveScenePreset('custom');
   };
 
   const handleLightingPreset = () => {
     runRendererCommand((renderer) => renderer.applyLightingPreset());
+    setActiveScenePreset('custom');
+  };
+
+  const handleScenePresetChange = (presetId: ScenePresetId) => {
+    const preset = SCENE_PRESETS[presetId];
+    setActiveScenePreset(presetId);
+    setShowFloor(preset.showFloor);
+    setShowWalls(preset.showWalls);
+    setFloorColor(rgb01ToHex(preset.floorColor));
+    setWallColor(rgb01ToHex(preset.wallColor));
+    setShowLightBeam(true);
+    runRendererCommand((renderer) => renderer.applyScenePreset(presetId));
   };
 
   const handleSaveScene = () => {
@@ -195,7 +212,10 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   const handleLoadSceneFile = (file: File) => {
     readJsonFile<SceneSnapshot>(
       file,
-      (scene) => runRendererCommand((renderer) => renderer.importScene(scene)),
+      (scene) => {
+        setActiveScenePreset('custom');
+        runRendererCommand((renderer) => renderer.importScene(scene));
+      },
       (error) => {
         console.error('Failed to load scene:', error);
         alert('Ошибка загрузки сцены: некорректный JSON');
@@ -271,21 +291,25 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
 
   const handleShowFloorChange = (value: boolean) => {
     setShowFloor(value);
+    setActiveScenePreset('custom');
     runRendererCommand((renderer) => renderer.setFloorVisible(value));
   };
 
   const handleShowWallsChange = (value: boolean) => {
     setShowWalls(value);
+    setActiveScenePreset('custom');
     runRendererCommand((renderer) => renderer.setWallsVisible(value));
   };
 
   const handleFloorColorChange = (hex: string) => {
     setFloorColor(hex);
+    setActiveScenePreset('custom');
     runRendererCommand((renderer) => renderer.setFloorColor(hexToRgb01(hex)));
   };
 
   const handleWallColorChange = (hex: string) => {
     setWallColor(hex);
+    setActiveScenePreset('custom');
     runRendererCommand((renderer) => renderer.setWallColor(hexToRgb01(hex)));
   };
 
@@ -306,15 +330,18 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   };
 
   const handleAddObject = () => {
+    setActiveScenePreset('custom');
     runRendererCommand((renderer) => renderer.addObject());
   };
 
   const handleRemoveObject = () => {
+    setActiveScenePreset('custom');
     runRendererCommand((renderer) => renderer.removeObject(objectMeta.activeIndex));
   };
 
   const handleObjectColorChange = (hex: string) => {
     setObjectState((previous) => ({ ...previous, color: hex }));
+    setActiveScenePreset('custom');
     runRendererCommand((renderer) => renderer.setActiveObjectColor(hexToRgb01(hex)));
   };
 
@@ -363,6 +390,8 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       onResetScene: handleResetScene,
       onResetModel: handleResetModel,
       onLightingPreset: handleLightingPreset,
+      activeScenePreset,
+      onScenePresetChange: handleScenePresetChange,
       lightMode: lightState.mode,
       onLightModeChange: handleLightModeChange,
       onLoadObjectTexture: handleLoadObjectTexture,

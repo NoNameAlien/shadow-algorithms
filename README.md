@@ -28,6 +28,7 @@
 - ✅ **Загрузка моделей** — поддержка OBJ файлов
 - ✅ **Grid с тенями** — процедурная сетка-приёмник теней
 - ✅ **Визуализация света** — перемещаемая сфера источника света
+- ✅ **Preset сцены** — Multiple Objects, Stairs, Forest для сравнения артефактов и производительности
 - ✅ **60 FPS** — оптимизированный рендер
 
 ## 🎮 Управление
@@ -151,8 +152,14 @@ src/
 
 - [x] Метрики производительности (FPS timeline, frame time)
 - [x] Визуализация Shadow Map (debug mode)
-- [ ] Preset сцены (Forest, Stairs, Multiple Objects)
+- [x] Preset сцены (Forest, Stairs, Multiple Objects)
 - [ ] Экспорт отчётов (PDF, CSV, скриншоты)
+
+## 🧪 Preset сцены
+
+- **Multiple Objects** — несколько объектов разных форм, размеров и материалов для проверки multi-object shadow pass.
+- **Stairs** — ступени разной высоты для оценки bias, aliasing, peter panning и поведения PCF/PCSS.
+- **Forest** — набор тонких стволов и крон для проверки плотных теней, VSM light bleeding и FPS.
 
 ## 🐛 Частые проблемы
 

@@ -20,6 +20,8 @@ type Props = Pick<
   | 'onLoadFloorTexture'
   | 'onSaveScene'
   | 'onLoadSceneFile'
+  | 'activeScenePreset'
+  | 'onScenePresetChange'
   | 'onExportCsv'
   | 'onExportPdf'
   | 'onExportScreenshot'
@@ -57,6 +59,8 @@ export function SceneControls({
   onLoadFloorTexture,
   onSaveScene,
   onLoadSceneFile,
+  activeScenePreset,
+  onScenePresetChange,
   onExportCsv,
   onExportPdf,
   onExportScreenshot
@@ -95,6 +99,8 @@ export function SceneControls({
         sceneFileInputRef={sceneFileInputRef}
         onSaveScene={onSaveScene}
         onLoadSceneFile={onLoadSceneFile}
+        activeScenePreset={activeScenePreset}
+        onScenePresetChange={onScenePresetChange}
         onExportCsv={onExportCsv}
         onExportPdf={onExportPdf}
         onExportScreenshot={onExportScreenshot}

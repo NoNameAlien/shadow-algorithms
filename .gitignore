@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 
+SENIOR_REVIEW.md
+
 ### Delete ###
 src/shaders/convert_shaders.sh
 src/shaders/shaders_text/

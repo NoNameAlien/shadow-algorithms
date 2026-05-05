@@ -44,6 +44,7 @@ export type LightDef = {
 export type SceneObject = {
   id: number;
   pos: vec3;
+  scale: vec3;
   moveSpeed: number;
   color: vec3;
   castShadows: boolean;
@@ -81,6 +82,7 @@ export type LightDTO = {
 
 export type ObjectDTO = {
   pos: [number, number, number];
+  scale?: [number, number, number];
   moveSpeed: number;
   color: [number, number, number];
   castShadows: boolean;

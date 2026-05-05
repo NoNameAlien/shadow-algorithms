@@ -33,6 +33,7 @@ import {
 } from "./scene";
 import { projectToScreen, raySphereHit } from "./interaction";
 import { createTextureFromImageFile } from "./textureUtils";
+import { SCENE_PRESETS, type ScenePresetId } from "./presets";
 import type {
   GPUCtx,
   LightDef,
@@ -48,6 +49,19 @@ import type {
 } from "./types";
 
 export type { LightMode, PerformanceMetrics, ShadowDebugMode, ShadowMethod } from "./types";
+
+type ObjectDrawState = {
+  mainUniformBuf: GPUBuffer;
+  shadowUniformBuf0: GPUBuffer;
+  shadowUniformBuf1: GPUBuffer;
+  objectParamsBuf: GPUBuffer;
+  mainBindGroup: GPUBindGroup;
+  shadowBindGroup0: GPUBindGroup;
+  shadowBindGroup1: GPUBindGroup;
+  vsmMomentsBindGroup: GPUBindGroup;
+  debugShadowDepthBindGroup0: GPUBindGroup;
+  debugShadowDepthBindGroup1: GPUBindGroup;
+};
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -133,10 +147,6 @@ export class Renderer {
 
   private uniformBuf!: GPUBuffer;
   private axisUniformBuf!: GPUBuffer;
-  private bindGroup0Main!: GPUBindGroup;
-  private bindGroup0Shadow!: GPUBindGroup;
-  private bindGroup0DebugShadowDepth!: GPUBindGroup;
-  private bindGroup0VSMMoments!: GPUBindGroup;
   private bindGroup1Main!: GPUBindGroup;
   private vsmBlurBindGroup0!: GPUBindGroup; // input -> output
   private debugShadowPrimaryBindGroup!: GPUBindGroup;
@@ -148,7 +158,6 @@ export class Renderer {
   private shadingBindGroupMain: GPUBindGroup | null = null;
   private shadingBindGroupGrid!: GPUBindGroup;
   private lightsBuf!: GPUBuffer;
-  private objectParamsBuf!: GPUBuffer;
   private shadowMatsBuf!: GPUBuffer;
 
   private objTexture!: GPUTexture;
@@ -252,16 +261,15 @@ export class Renderer {
   private lastShadowMats = new Float32Array(40);
   private lastGridParams = new Float32Array(8);
   private lastLightsData = new Float32Array(8 + 4 * 16);
-  private lastObjParams = new Float32Array(8);
   private lastUniformViewProj = new Float32Array(16);
   private lastUniformLight = new Float32Array(4);
   private lastUniformCamera = new Float32Array(4);
   private lastUniformShadowParams = new Float32Array(4);
+  private tempObjectUniformData = new Float32Array(60);
   private shadingBufferDirty = true;
   private shadowMatsBufferDirty = true;
   private gridParamsBufferDirty = true;
   private lightsBufferDirty = true;
-  private objectParamsBufferDirty = true;
   private uniformViewProjDirty = true;
   private uniformLightDirty = true;
   private uniformCameraDirty = true;
@@ -280,6 +288,8 @@ export class Renderer {
   private tempLightUp = vec3.fromValues(0, 1, 0);
   private tempLightBeamDir = vec3.create();
   private tempLightBeamEnd = vec3.create();
+  private objectDrawStates: ObjectDrawState[] = [];
+  private objectDrawStateMethod: ShadowMethod | null = null;
 
   // Метаданные для UI
   getLightsMeta() {
@@ -467,6 +477,7 @@ export class Renderer {
     if (!obj) {
       return {
         color: [1, 1, 1] as [number, number, number],
+        scale: [1, 1, 1] as [number, number, number],
         castShadows: true,
         receiveShadows: false,
         selfShadows: false,
@@ -478,6 +489,11 @@ export class Renderer {
     }
     return {
       color: [obj.color[0], obj.color[1], obj.color[2]] as [
+        number,
+        number,
+        number,
+      ],
+      scale: [obj.scale[0], obj.scale[1], obj.scale[2]] as [
         number,
         number,
         number,
@@ -693,6 +709,126 @@ export class Renderer {
     return this.meshById.get(meshId) ?? this.meshes[0];
   }
 
+  private writeObjectModelMatrix(out: mat4, obj: SceneObject, rotation: mat4) {
+    mat4.fromTranslation(out, obj.pos);
+    mat4.multiply(out, out, rotation);
+    mat4.scale(out, out, obj.scale);
+  }
+
+  private fillObjectUniformData(
+    target: Float32Array,
+    model: mat4,
+    lightViewProj: mat4,
+    lightPos: vec3,
+    camPos: vec3,
+    shadowParamsUniform: Float32Array,
+  ) {
+    target.set(model, 0);
+    target.set(this.viewProj, 16);
+    target.set(lightViewProj, 32);
+    target[48] = lightPos[0];
+    target[49] = lightPos[1];
+    target[50] = lightPos[2];
+    target[51] = this.lightSelected ? 1 : 0;
+    target[52] = camPos[0];
+    target[53] = camPos[1];
+    target[54] = camPos[2];
+    target[55] = 1.0;
+    target.set(shadowParamsUniform, 56);
+  }
+
+  private createObjectUniformBuffer(): GPUBuffer {
+    return this.gpu.device.createBuffer({
+      size: 16 * 4 * 3 + 4 * 4 * 3,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+  }
+
+  private createObjectParamsBuffer(): GPUBuffer {
+    return this.gpu.device.createBuffer({
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+  }
+
+  private createObjectDrawState(currentPipeline: GPURenderPipeline): ObjectDrawState {
+    const { device } = this.gpu;
+    const mainUniformBuf = this.createObjectUniformBuffer();
+    const shadowUniformBuf0 = this.createObjectUniformBuffer();
+    const shadowUniformBuf1 = this.createObjectUniformBuffer();
+    const objectParamsBuf = this.createObjectParamsBuffer();
+
+    return {
+      mainUniformBuf,
+      shadowUniformBuf0,
+      shadowUniformBuf1,
+      objectParamsBuf,
+      mainBindGroup: device.createBindGroup({
+        layout: currentPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: mainUniformBuf } },
+          { binding: 1, resource: { buffer: objectParamsBuf } },
+          { binding: 2, resource: { buffer: this.shadowMatsBuf } },
+        ],
+      }),
+      shadowBindGroup0: device.createBindGroup({
+        label: "object shadow pass uniforms bind group 0",
+        layout: this.shadowPipeline.getBindGroupLayout(0),
+        entries: [{ binding: 0, resource: { buffer: shadowUniformBuf0 } }],
+      }),
+      shadowBindGroup1: device.createBindGroup({
+        label: "object shadow pass uniforms bind group 1",
+        layout: this.shadowPipeline.getBindGroupLayout(0),
+        entries: [{ binding: 0, resource: { buffer: shadowUniformBuf1 } }],
+      }),
+      vsmMomentsBindGroup: device.createBindGroup({
+        label: "object vsm moments uniforms bind group",
+        layout: this.vsmMomentsPipeline.getBindGroupLayout(0),
+        entries: [{ binding: 0, resource: { buffer: shadowUniformBuf0 } }],
+      }),
+      debugShadowDepthBindGroup0: device.createBindGroup({
+        label: "object debug shadow depth uniforms bind group 0",
+        layout: this.debugShadowDepthPipeline.getBindGroupLayout(0),
+        entries: [{ binding: 0, resource: { buffer: shadowUniformBuf0 } }],
+      }),
+      debugShadowDepthBindGroup1: device.createBindGroup({
+        label: "object debug shadow depth uniforms bind group 1",
+        layout: this.debugShadowDepthPipeline.getBindGroupLayout(0),
+        entries: [{ binding: 0, resource: { buffer: shadowUniformBuf1 } }],
+      }),
+    };
+  }
+
+  private destroyObjectDrawStates() {
+    for (const state of this.objectDrawStates) {
+      state.mainUniformBuf.destroy();
+      state.shadowUniformBuf0.destroy();
+      state.shadowUniformBuf1.destroy();
+      state.objectParamsBuf.destroy();
+    }
+    this.objectDrawStates = [];
+    this.objectDrawStateMethod = null;
+  }
+
+  private getCurrentMainPipeline(): GPURenderPipeline {
+    if (this.shadowParams.method === "PCF") return this.pipelinePCF;
+    if (this.shadowParams.method === "PCSS") return this.pipelinePCSS;
+    if (this.shadowParams.method === "VSM") return this.pipelineVSM;
+    return this.pipelineSM;
+  }
+
+  private ensureObjectDrawStates() {
+    if (
+      this.objectDrawStates.length !== this.objects.length ||
+      this.objectDrawStateMethod !== this.shadowParams.method
+    ) {
+      this.destroyObjectDrawStates();
+      const currentPipeline = this.getCurrentMainPipeline();
+      this.objectDrawStates = this.objects.map(() => this.createObjectDrawState(currentPipeline));
+      this.objectDrawStateMethod = this.shadowParams.method;
+    }
+  }
+
   private static floatArraysEqual(
     left: Float32Array,
     right: Float32Array,
@@ -735,7 +871,7 @@ export class Renderer {
   }
 
   private markObjectParamsDirty() {
-    this.objectParamsBufferDirty = true;
+    // Object params are written into per-object buffers before every frame.
   }
 
   private initSpotOrientationFromPosition() {
@@ -995,8 +1131,10 @@ export class Renderer {
     let bestObjIndex = -1;
 
     for (let i = 0; i < this.objects.length; i++) {
-      const center = this.objects[i].pos;
-      const t = raySphereHit(rayOrigin, rayDir, center, objectRadius);
+      const object = this.objects[i];
+      const center = object.pos;
+      const scaledRadius = objectRadius * Math.max(object.scale[0], object.scale[1], object.scale[2]);
+      const t = raySphereHit(rayOrigin, rayDir, center, scaledRadius);
       if (t < bestObjT) {
         bestObjT = t;
         bestObjIndex = i;
@@ -1409,14 +1547,12 @@ export class Renderer {
     this.axisUniformBuf = buffers.axisUniformBuf;
     this.shadingBuf = buffers.shadingBuf;
     this.gridParamsBuf = buffers.gridParamsBuf;
-    this.objectParamsBuf = buffers.objectParamsBuf;
     this.shadowMatsBuf = buffers.shadowMatsBuf;
     this.lightsBuf = buffers.lightsBuf;
     this.shadingBufferDirty = true;
     this.shadowMatsBufferDirty = true;
     this.gridParamsBufferDirty = true;
     this.lightsBufferDirty = true;
-    this.objectParamsBufferDirty = true;
     this.uniformViewProjDirty = true;
     this.uniformLightDirty = true;
     this.uniformCameraDirty = true;
@@ -1431,33 +1567,6 @@ export class Renderer {
     if (this.shadowParams.method === "PCSS")
       currentPipeline = this.pipelinePCSS;
     if (this.shadowParams.method === "VSM") currentPipeline = this.pipelineVSM;
-
-    this.bindGroup0Shadow = device.createBindGroup({
-      label: "shadow pass uniforms bind group",
-      layout: this.shadowPipeline.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }],
-    });
-
-    this.bindGroup0DebugShadowDepth = device.createBindGroup({
-      label: "debug shadow depth uniforms bind group",
-      layout: this.debugShadowDepthPipeline.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }],
-    });
-
-    this.bindGroup0VSMMoments = device.createBindGroup({
-      label: "vsm moments uniforms bind group",
-      layout: this.vsmMomentsPipeline.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: { buffer: this.uniformBuf } }],
-    });
-
-    this.bindGroup0Main = device.createBindGroup({
-      layout: currentPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.uniformBuf } },
-        { binding: 1, resource: { buffer: this.objectParamsBuf } },
-        { binding: 2, resource: { buffer: this.shadowMatsBuf } },
-      ],
-    });
 
     if (this.shadowParams.method === "PCSS") {
       this.bindGroup1Main = device.createBindGroup({
@@ -1531,6 +1640,8 @@ export class Renderer {
         { binding: 1, resource: this.vsmSampler },
       ],
     });
+
+    this.destroyObjectDrawStates();
 
     this.gridBindGroup = device.createBindGroup({
       layout: this.gridPipeline.getBindGroupLayout(0),
@@ -1972,8 +2083,8 @@ export class Renderer {
     if (this.lightBeamVBO) this.lightBeamVBO.destroy();
     if (this.lightBeamIBO) this.lightBeamIBO.destroy();
     if (this.lightsBuf) this.lightsBuf.destroy();
-    if (this.objectParamsBuf) this.objectParamsBuf.destroy();
     if (this.shadowMatsBuf) this.shadowMatsBuf.destroy();
+    this.destroyObjectDrawStates();
 
     console.log("✓ Renderer destroyed");
   }
@@ -2291,6 +2402,47 @@ export class Renderer {
       this.updateLightBeamGeometry();
     }
 
+    this.ensureObjectDrawStates();
+    for (let i = 0; i < this.objects.length; i++) {
+      const obj = this.objects[i];
+      const state = this.objectDrawStates[i];
+      const modelMat = this.tempObjectModel;
+      this.writeObjectModelMatrix(modelMat, obj, rotation);
+
+      const uniformData = this.tempObjectUniformData;
+      this.fillObjectUniformData(
+        uniformData,
+        modelMat,
+        lightViewProj0,
+        lightPos,
+        camPos,
+        shadowParamsUniform,
+      );
+      device.queue.writeBuffer(state.mainUniformBuf, 0, uniformData);
+      device.queue.writeBuffer(state.shadowUniformBuf0, 0, uniformData);
+
+      this.fillObjectUniformData(
+        uniformData,
+        modelMat,
+        lightViewProj1,
+        lightPos,
+        camPos,
+        shadowParamsUniform,
+      );
+      device.queue.writeBuffer(state.shadowUniformBuf1, 0, uniformData);
+
+      const objParams = this.tempObjParams;
+      objParams[0] = obj.color[0];
+      objParams[1] = obj.color[1];
+      objParams[2] = obj.color[2];
+      objParams[3] = obj.receiveShadows ? 1.0 : 0.0;
+      objParams[4] = obj.specular;
+      objParams[5] = obj.shininess;
+      objParams[6] = obj.selfShadows ? 1.0 : 0.0;
+      objParams[7] = obj.roughness;
+      device.queue.writeBuffer(state.objectParamsBuf, 0, objParams);
+    }
+
     const encoder = device.createCommandEncoder();
     const debugShadowDepth = this.shadowParams.debugShadowMap !== "off" && this.shadowParams.method !== "VSM";
 
@@ -2337,24 +2489,16 @@ export class Renderer {
         },
       });
       vsmPass.setPipeline(this.vsmMomentsPipeline);
-      vsmPass.setBindGroup(0, this.bindGroup0VSMMoments);
-      device.queue.writeBuffer(
-        this.uniformBuf,
-        32 * 4,
-        lightViewProj0 as Float32Array,
-      );
 
-      for (const obj of this.objects) {
+      for (let i = 0; i < this.objects.length; i++) {
+        const obj = this.objects[i];
         if (!obj.castShadows) continue;
 
+        const state = this.objectDrawStates[i];
         const mesh = this.getMesh(obj.meshId);
+        vsmPass.setBindGroup(0, state.vsmMomentsBindGroup);
         vsmPass.setVertexBuffer(0, mesh.vbo);
         vsmPass.setIndexBuffer(mesh.ibo, "uint16");
-
-        const modelMat = this.tempObjectModel;
-        mat4.fromTranslation(modelMat, obj.pos);
-        mat4.multiply(modelMat, modelMat, rotation);
-        device.queue.writeBuffer(this.uniformBuf, 0, modelMat as Float32Array);
 
         vsmPass.drawIndexed(mesh.indexCount);
       }
@@ -2383,29 +2527,16 @@ export class Renderer {
             },
           });
           shadowPass0.setPipeline(this.shadowPipeline);
-          shadowPass0.setBindGroup(0, this.bindGroup0Shadow);
-          device.queue.writeBuffer(
-            this.uniformBuf,
-            32 * 4,
-            lightViewProj0 as Float32Array,
-          );
 
-          for (const obj of this.objects) {
+          for (let i = 0; i < this.objects.length; i++) {
+            const obj = this.objects[i];
             if (!obj.castShadows) continue;
 
+            const state = this.objectDrawStates[i];
             const mesh = this.getMesh(obj.meshId);
+            shadowPass0.setBindGroup(0, state.shadowBindGroup0);
             shadowPass0.setVertexBuffer(0, mesh.vbo);
             shadowPass0.setIndexBuffer(mesh.ibo, "uint16");
-
-            const modelMat = this.tempObjectModel;
-            mat4.fromTranslation(modelMat, obj.pos);
-            mat4.multiply(modelMat, modelMat, rotation);
-
-            device.queue.writeBuffer(
-              this.uniformBuf,
-              0,
-              modelMat as Float32Array,
-            );
 
             shadowPass0.drawIndexed(mesh.indexCount);
           }
@@ -2413,7 +2544,7 @@ export class Renderer {
           shadowPass0.end();
 
           if (debugShadowDepth) {
-            this.renderShadowDebugDepthPass(encoder, this.shadowDebugView, lightViewProj0, rotation);
+            this.renderShadowDebugDepthPass(encoder, this.shadowDebugView, 0);
           }
         }
 
@@ -2429,29 +2560,16 @@ export class Renderer {
             },
           });
           shadowPass1.setPipeline(this.shadowPipeline);
-          shadowPass1.setBindGroup(0, this.bindGroup0Shadow);
-          device.queue.writeBuffer(
-            this.uniformBuf,
-            32 * 4,
-            lightViewProj1 as Float32Array,
-          );
 
-          for (const obj of this.objects) {
+          for (let i = 0; i < this.objects.length; i++) {
+            const obj = this.objects[i];
             if (!obj.castShadows) continue;
 
+            const state = this.objectDrawStates[i];
             const mesh = this.getMesh(obj.meshId);
+            shadowPass1.setBindGroup(0, state.shadowBindGroup1);
             shadowPass1.setVertexBuffer(0, mesh.vbo);
             shadowPass1.setIndexBuffer(mesh.ibo, "uint16");
-
-            const modelMat = this.tempObjectModel;
-            mat4.fromTranslation(modelMat, obj.pos);
-            mat4.multiply(modelMat, modelMat, rotation);
-
-            device.queue.writeBuffer(
-              this.uniformBuf,
-              0,
-              modelMat as Float32Array,
-            );
 
             shadowPass1.drawIndexed(mesh.indexCount);
           }
@@ -2459,7 +2577,7 @@ export class Renderer {
           shadowPass1.end();
 
           if (debugShadowDepth) {
-            this.renderShadowDebugDepthPass(encoder, this.shadowDebugView1, lightViewProj1, rotation);
+            this.renderShadowDebugDepthPass(encoder, this.shadowDebugView1, 1);
           }
         }
       } else {
@@ -2474,35 +2592,23 @@ export class Renderer {
           },
         });
           shadowPass.setPipeline(this.shadowPipeline);
-          shadowPass.setBindGroup(0, this.bindGroup0Shadow);
-          device.queue.writeBuffer(
-            this.uniformBuf,
-            32 * 4,
-            lightViewProj0 as Float32Array,
-          );
 
-        for (const obj of this.objects) {
+        for (let i = 0; i < this.objects.length; i++) {
+          const obj = this.objects[i];
           if (!obj.castShadows) continue;
 
+          const state = this.objectDrawStates[i];
           const mesh = this.getMesh(obj.meshId);
+          shadowPass.setBindGroup(0, state.shadowBindGroup0);
           shadowPass.setVertexBuffer(0, mesh.vbo);
           shadowPass.setIndexBuffer(mesh.ibo, "uint16");
-
-          const modelMat = this.tempObjectModel;
-          mat4.fromTranslation(modelMat, obj.pos);
-          mat4.multiply(modelMat, modelMat, rotation);
-          device.queue.writeBuffer(
-            this.uniformBuf,
-            0,
-            modelMat as Float32Array,
-          );
 
           shadowPass.drawIndexed(mesh.indexCount);
         }
         shadowPass.end();
 
         if (debugShadowDepth) {
-          this.renderShadowDebugDepthPass(encoder, this.shadowDebugView, lightViewProj0, rotation);
+          this.renderShadowDebugDepthPass(encoder, this.shadowDebugView, 0);
         }
       }
     }
@@ -2532,7 +2638,6 @@ export class Renderer {
       },
     });
     scenePass.setPipeline(currentPipeline);
-    scenePass.setBindGroup(0, this.bindGroup0Main);
     scenePass.setBindGroup(1, this.bindGroup1Main);
     scenePass.setBindGroup(2, this.objTexBindGroup);
 
@@ -2540,37 +2645,15 @@ export class Renderer {
       scenePass.setBindGroup(3, this.shadingBindGroupMain);
     }
 
-    for (const obj of this.objects) {
+    for (let i = 0; i < this.objects.length; i++) {
+      const obj = this.objects[i];
+      const state = this.objectDrawStates[i];
       const mesh = this.getMesh(obj.meshId);
+      scenePass.setBindGroup(0, state.mainBindGroup);
       scenePass.setVertexBuffer(0, mesh.vbo);
       scenePass.setVertexBuffer(1, mesh.nbo);
       scenePass.setVertexBuffer(2, mesh.tbo);
       scenePass.setIndexBuffer(mesh.ibo, "uint16");
-
-      const modelMat = this.tempObjectModel;
-      mat4.fromTranslation(modelMat, obj.pos);
-      mat4.multiply(modelMat, modelMat, rotation);
-      device.queue.writeBuffer(this.uniformBuf, 0, modelMat as Float32Array);
-
-      const objParams = this.tempObjParams;
-      objParams[0] = obj.color[0];
-      objParams[1] = obj.color[1];
-      objParams[2] = obj.color[2];
-      objParams[3] = obj.receiveShadows ? 1.0 : 0.0;
-      objParams[4] = obj.specular;
-      objParams[5] = obj.shininess;
-      objParams[6] = obj.selfShadows ? 1.0 : 0.0;
-      objParams[7] = obj.roughness;
-      if (
-        this.writeBufferIfChanged(
-          this.objectParamsBuf,
-          objParams,
-          this.lastObjParams,
-          this.objectParamsBufferDirty,
-        )
-      ) {
-        this.objectParamsBufferDirty = false;
-      }
 
       scenePass.drawIndexed(mesh.indexCount);
     }
@@ -2621,10 +2704,8 @@ export class Renderer {
   private renderShadowDebugDepthPass(
     encoder: GPUCommandEncoder,
     targetView: GPUTextureView,
-    lightViewProj: mat4,
-    rotation: mat4,
+    shadowBufferIndex: 0 | 1,
   ) {
-    const { device } = this.gpu;
     const debugPass = encoder.beginRenderPass({
       colorAttachments: [
         {
@@ -2637,24 +2718,21 @@ export class Renderer {
     });
 
     debugPass.setPipeline(this.debugShadowDepthPipeline);
-    debugPass.setBindGroup(0, this.bindGroup0DebugShadowDepth);
-    device.queue.writeBuffer(
-      this.uniformBuf,
-      32 * 4,
-      lightViewProj as Float32Array,
-    );
 
-    for (const obj of this.objects) {
+    for (let i = 0; i < this.objects.length; i++) {
+      const obj = this.objects[i];
       if (!obj.castShadows) continue;
 
+      const state = this.objectDrawStates[i];
       const mesh = this.getMesh(obj.meshId);
+      debugPass.setBindGroup(
+        0,
+        shadowBufferIndex === 0
+          ? state.debugShadowDepthBindGroup0
+          : state.debugShadowDepthBindGroup1,
+      );
       debugPass.setVertexBuffer(0, mesh.vbo);
       debugPass.setIndexBuffer(mesh.ibo, "uint16");
-
-      const modelMat = this.tempObjectModel;
-      mat4.fromTranslation(modelMat, obj.pos);
-      mat4.multiply(modelMat, modelMat, rotation);
-      device.queue.writeBuffer(this.uniformBuf, 0, modelMat as Float32Array);
 
       debugPass.drawIndexed(mesh.indexCount);
     }
@@ -2955,6 +3033,105 @@ export class Renderer {
     this.selection = "none";
     this.markObjectParamsDirty();
     this.markLightDataDirty();
+    this.shadingBufferDirty = true;
+    this.shadowMatsBufferDirty = true;
+    this.uniformShadowParamsDirty = true;
+    this.lightBeamDirty = true;
+    this.updateLightViewProj();
+  }
+
+  applyScenePreset(presetId: ScenePresetId) {
+    const preset = SCENE_PRESETS[presetId];
+    if (!preset) return;
+
+    this.cameraController.reset();
+    this.updateViewProj();
+
+    this.objects = preset.objects.map((object, index) =>
+      createSceneObject({
+        id: index,
+        objectPos: vec3.fromValues(object.pos[0], object.pos[1], object.pos[2]),
+        objectMoveSpeed: this.objectMoveSpeed,
+        defaultMeshId: this.defaultMeshId,
+        def: {
+          pos: vec3.fromValues(object.pos[0], object.pos[1], object.pos[2]),
+          scale: vec3.fromValues(
+            object.scale?.[0] ?? 1,
+            object.scale?.[1] ?? 1,
+            object.scale?.[2] ?? 1,
+          ),
+          meshId: object.meshId ?? this.defaultMeshId,
+          color: object.color
+            ? vec3.fromValues(object.color[0], object.color[1], object.color[2])
+            : vec3.fromValues(1, 1, 1),
+          castShadows: object.castShadows ?? true,
+          receiveShadows: object.receiveShadows ?? true,
+          selfShadows: object.selfShadows ?? false,
+          specular: object.specular ?? 0.4,
+          roughness: object.roughness ?? 0.55,
+          shininess: object.shininess ?? 4 + (1 - (object.roughness ?? 0.55)) * 124,
+        },
+      }),
+    );
+
+    this.activeObjectIndex = 0;
+    vec3.copy(this.objectPos, this.objects[0].pos);
+
+    this.lights = preset.lights.map((light) =>
+      createLight({
+        objectPos: this.objectPos,
+        def: {
+          pos: vec3.fromValues(light.pos[0], light.pos[1], light.pos[2]),
+          type: light.type,
+          yaw: light.yaw ?? 0,
+          pitch: light.pitch ?? -0.65,
+          intensity: light.intensity ?? 1,
+          color: light.color
+            ? vec3.fromValues(light.color[0], light.color[1], light.color[2])
+            : vec3.fromValues(1, 1, 1),
+          castShadows: light.castShadows ?? true,
+          innerConeDeg: light.innerConeDeg ?? 15,
+          outerConeDeg: light.outerConeDeg ?? 32,
+          range: light.range ?? 14,
+          falloff: light.falloff ?? 1.5,
+        },
+      }),
+    );
+
+    if (this.lights.length === 0) {
+      this.initDefaultLights();
+    }
+    this.activeLightIndex = 0;
+    const main = this.lights[0];
+    this.lightMode = main.type;
+    this.lightIntensity = main.intensity;
+    vec3.copy(this.lightDir, main.pos);
+    this.spotYaw = main.yaw;
+    this.spotPitch = main.pitch;
+
+    vec3.set(this.floorColor, preset.floorColor[0], preset.floorColor[1], preset.floorColor[2]);
+    vec3.set(this.wallColor, preset.wallColor[0], preset.wallColor[1], preset.wallColor[2]);
+    this.showFloor = preset.showFloor;
+    this.showWalls = preset.showWalls;
+
+    if (preset.shadowMethod) {
+      this.updateShadowParams({
+        ...this.shadowParams,
+        method: preset.shadowMethod,
+      });
+    }
+
+    this.arcball.reset();
+    this.selection = "none";
+    this.isDraggingObject = false;
+    this.isDraggingLight = false;
+    this.isRotatingLight = false;
+    this.dragAxisIndex = -1;
+    this.canvas.style.cursor = "default";
+
+    this.markObjectParamsDirty();
+    this.markLightDataDirty();
+    this.markGridParamsDirty();
     this.shadingBufferDirty = true;
     this.shadowMatsBufferDirty = true;
     this.uniformShadowParamsDirty = true;
