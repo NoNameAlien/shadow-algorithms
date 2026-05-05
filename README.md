@@ -172,24 +172,47 @@ Debug overlays / gizmo / light beam
 
 ## Методы теней
 
+Раздел ниже описывает четыре режима, которые можно сравнивать в лаборатории: `SM`, `PCF`, `PCSS` и `VSM`.
+
+Кратко различие такое:
+
+- `SM` отвечает на вопрос: **точка видна источнику света или закрыта?** Используется один depth compare, поэтому тень получается жесткой.
+- `PCF` делает то же самое, но **несколько раз рядом с текущей точкой** и усредняет результат. Поэтому край тени выглядит мягче, но мягкость почти постоянная.
+- `PCSS` дополнительно ищет blocker и оценивает **размер полутени**. Чем дальше receiver от blocker, тем шире и мягче край.
+- `VSM` не делает классический depth compare. Он хранит статистику глубины — моменты — и оценивает вероятность того, что точка освещена. Это удобно фильтровать и размывать, но может появляться light bleeding.
+
 ### Общая идея Shadow Mapping
 
-Сначала сцена рендерится из позиции/направления источника света. Вместо цвета сохраняется глубина ближайшей поверхности.
+Сначала сцена рендерится из позиции/направления источника света. Вместо цвета сохраняется глубина ближайшей поверхности. Затем при основном рендеринге каждый фрагмент проецируется в пространство света и сравнивается с сохраненной глубиной.
 
-```text
-Light camera
-    |
-    v
-depth map = closest depth from light
+Математическая запись преобразования фрагмента в пространство света:
 
-Main camera fragment
-    |
-    v
-project fragment into light space
-compare(fragmentDepth, shadowMapDepth)
-```
+$$
+egin{aligned}
+p_{clip}^{light} &= M_{lightViewProj} \cdot egin{bmatrix}p_{world} \ 1\end{bmatrix}, \
+p_{ndc}^{light} &= rac{p_{clip}^{light}.xyz}{p_{clip}^{light}.w}, \
+uv &= p_{ndc}^{light}.xy \cdot 0.5 + 0.5, \
+z_{receiver} &= p_{ndc}^{light}.z.
+\end{aligned}
+$$
 
-Математически:
+Базовая проверка видимости:
+
+$$
+visibility =
+egin{cases}
+1, & z_{receiver} - bias \le z_{occluder}, \
+0, & z_{receiver} - bias > z_{occluder}.
+\end{cases}
+$$
+
+Где:
+
+- $z_{receiver}$ — глубина текущего фрагмента относительно источника света;
+- $z_{occluder}$ — глубина ближайшей поверхности, записанная в shadow map;
+- $bias$ — небольшая поправка, которая уменьшает shadow acne.
+
+То же самое в псевдокоде:
 
 ```text
 p_world = position of current fragment
@@ -202,7 +225,17 @@ z_occluder = shadowMap(uv)
 visibility = z_receiver - bias <= z_occluder ? 1 : 0
 ```
 
-Итоговое освещение:
+Итоговое освещение можно представить так:
+
+$$
+L_{out} = baseColor \cdot \left(ambient + diffuse \cdot visibility \cdot lightIntensityight)
+$$
+
+Где диффузная часть обычно считается через скалярное произведение нормали и направления на свет:
+
+$$
+diffuse = \max(N \cdot L, 0)
+$$
 
 ```text
 L = direction from fragment to light
@@ -213,10 +246,41 @@ color = baseColor * (ambient + diffuse * visibility * lightIntensity)
 
 ### 1. SM: Shadow Mapping
 
-`SM` делает один depth compare на фрагмент.
+`SM` — самый базовый метод. Для каждого фрагмента выполняется один depth compare: если фрагмент дальше от источника, чем значение в shadow map, значит между ним и светом есть другой объект, и фрагмент находится в тени.
+
+Математически:
+
+$$
+visibility = compare\left(shadowMap, uv, z_{receiver} - biasight)
+$$
+
+Или в развернутом виде:
+
+$$
+visibility =
+egin{cases}
+1, & z_{receiver} - bias \le shadowMap(uv), \
+0, & z_{receiver} - bias > shadowMap(uv).
+\end{cases}
+$$
 
 ```text
 visibility = compare(shadowMap, uv, z_receiver - bias)
+```
+
+Схема:
+
+```text
+Light camera
+    |
+    v
+depth map = closest depth from light
+
+Main camera fragment
+    |
+    v
+project fragment into light space
+compare(fragmentDepth, shadowMapDepth)
 ```
 
 Плюсы:
@@ -234,7 +298,21 @@ visibility = compare(shadowMap, uv, z_receiver - bias)
 
 ### 2. PCF: Percentage Closer Filtering
 
-`PCF` делает несколько depth compare вокруг текущего `uv` и усредняет результат.
+`PCF` — это сглаженная версия обычного Shadow Mapping. Вместо одного сравнения метод делает несколько сравнений вокруг текущего `uv`, а затем усредняет результат. Поэтому край тени становится не бинарным, а постепенным.
+
+Главное отличие от `SM`: `SM` возвращает только `0` или `1`, а `PCF` может вернуть промежуточное значение, например `0.35` или `0.7`.
+
+Математически:
+
+$$
+visibility = rac{1}{n}\sum_{i=1}^{n} compare\left(shadowMap, uv + offset_i, z_{receiver} - biasight)
+$$
+
+Где:
+
+- $n$ — количество сэмплов;
+- $offset_i$ — смещение очередного сэмпла относительно текущего `uv`;
+- результат — средняя доля сэмплов, которые оказались освещенными.
 
 ```text
 visibility = 1 / n * sum(compare(shadowMap, uv + offset_i, z_receiver - bias))
@@ -254,8 +332,8 @@ PCF:
 
 Параметры:
 
-- `pcfRadius` - радиус сэмплов в texel.
-- `pcfSamples` - количество сэмплов.
+- `pcfRadius` — радиус сэмплов в texel;
+- `pcfSamples` — количество сэмплов.
 
 Плюсы:
 
@@ -266,14 +344,50 @@ PCF:
 Минусы:
 
 - мягкость края постоянная;
-- не моделирует физическую пенумбру.
+- не моделирует физическую пенумбру;
+- при большом радиусе может выглядеть как простое размытие, а не реалистичная мягкая тень.
 
 ### 3. PCSS: Percentage Closer Soft Shadows
 
-`PCSS` пытается приблизить мягкие тени от источника конечного размера. Алгоритм состоит из двух этапов:
+`PCSS` пытается приблизить мягкие тени от источника конечного размера. В реальности тень становится мягче, когда receiver находится дальше от blocker. Поэтому `PCSS` сначала ищет среднюю глубину blocker'ов, а потом увеличивает радиус PCF в зависимости от расстояния между blocker и receiver.
+
+Главное отличие от `PCF`: в `PCF` радиус фильтра почти фиксированный, а в `PCSS` радиус зависит от геометрии сцены. Близко к объекту тень резче, дальше от объекта — мягче.
+
+Алгоритм состоит из двух этапов:
 
 1. Поиск blocker depth.
 2. PCF с радиусом, зависящим от расстояния между receiver и blocker.
+
+Математически средняя глубина blocker'ов:
+
+$$
+z_{blockerAvg} = rac{1}{k}\sum_{j=1}^{k} z_j, \quad z_j < z_{receiver}
+$$
+
+Оценка размера полутени:
+
+$$
+penumbra = rac{z_{receiver} - z_{blockerAvg}}{z_{blockerAvg}}
+$$
+
+Радиус фильтрации:
+
+$$
+filterRadius = lightSize \cdot penumbra
+$$
+
+Финальная видимость:
+
+$$
+visibility = rac{1}{n}\sum_{i=1}^{n} compare\left(shadowMap, uv + offset_i \cdot filterRadius, z_{receiver} - biasight)
+$$
+
+```text
+z_blocker_avg = average(depth samples where z_sample < z_receiver)
+penumbra = (z_receiver - z_blocker_avg) / z_blocker_avg
+filterRadius = lightSize * penumbra
+visibility = PCF(uv, filterRadius)
+```
 
 Схема:
 
@@ -283,20 +397,10 @@ Light
    \       |
     \      v
      \   [object]
-      \
-       \________ receiver
+             \________ receiver
 
 far receiver -> wider penumbra
 near receiver -> sharper shadow
-```
-
-Математически:
-
-```text
-z_blocker_avg = average(depth samples where z_sample < z_receiver)
-penumbra = (z_receiver - z_blocker_avg) / z_blocker_avg
-filterRadius = lightSize * penumbra
-visibility = PCF(uv, filterRadius)
 ```
 
 В проекте:
@@ -308,25 +412,59 @@ visibility = PCF(uv, filterRadius)
 Плюсы:
 
 - тень становится мягче с расстоянием;
-- визуально ближе к реальным мягким теням.
+- визуально ближе к реальным мягким теням;
+- хорошо показывает разницу между простым blur и contact-hardening shadows.
 
 Минусы:
 
 - дороже PCF;
 - чувствителен к bias и разрешению shadow map;
-- может шуметь на тонкой геометрии.
+- может шуметь на тонкой геометрии;
+- blocker search добавляет нестабильность при сложной или плотной сцене.
 
 ### 4. VSM: Variance Shadow Maps
 
-`VSM` хранит не только глубину, а два момента:
+`VSM` работает иначе: вместо одного значения глубины он хранит два момента распределения глубины. Это позволяет размывать shadow texture обычной фильтрацией или compute blur'ом, а потом оценивать вероятность того, что receiver освещен.
+
+Главное отличие от `SM/PCF/PCSS`: эти методы сравнивают глубину напрямую, а `VSM` работает со статистической оценкой. Поэтому `VSM` хорошо фильтруется, но может ошибаться и пропускать свет там, где должна быть тень.
+
+Моменты:
+
+$$
+m_1 = E[z]
+$$
+
+$$
+m_2 = E[z^2]
+$$
+
+Дисперсия:
+
+$$
+\sigma^2 = m_2 - m_1^2
+$$
+
+Оценка верхней границы вероятности через неравенство Чебышева:
+
+$$
+p_{max} = rac{\sigma^2}{\sigma^2 + (z_{receiver} - m_1)^2}
+$$
+
+Практическая версия с минимальной дисперсией:
+
+$$
+variance = \max(m_2 - m_1^2, minVariance)
+$$
+
+$$
+visibility = clamp\left(rac{variance}{variance + (z_{receiver} - m_1)^2}, 0, 1ight)
+$$
 
 ```text
 m1 = E[z]
 m2 = E[z^2]
 variance = m2 - m1^2
 ```
-
-После shadow pass moments texture размывается compute shader'ом. Затем видимость оценивается через неравенство Чебышева.
 
 ```text
 d = z_receiver
@@ -352,13 +490,15 @@ Main pass:
 
 - хорошо фильтруется;
 - blur можно делать compute shader'ом;
-- мягкие края без большого числа depth compare.
+- мягкие края без большого числа depth compare;
+- удобен для демонстрации moments texture и post-processing подхода.
 
 Минусы:
 
 - light bleeding;
 - требует настройки `minVariance` и `lightBleedReduction`;
-- multi-light VSM сложнее: для каждого источника нужны свои moments и blur.
+- multi-light VSM сложнее: для каждого источника нужны свои moments и blur;
+- статистическая оценка может давать визуально правдоподобный, но не всегда физически корректный результат.
 
 ## Источники света
 
