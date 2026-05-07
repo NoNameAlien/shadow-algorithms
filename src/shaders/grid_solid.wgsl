@@ -35,14 +35,14 @@ struct GridParams {
 struct ShadowMatrices {
   count: f32,
   _pad0: vec3<f32>,
-  mats: array<mat4x4<f32>, 2>,
+  mats: array<mat4x4<f32>, 8>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var<uniform> gridParams: GridParams;
 @group(0) @binding(2) var<uniform> shadowMats: ShadowMatrices;
 
-@group(1) @binding(0) var shadowMap: texture_depth_2d;
+@group(1) @binding(0) var shadowMap: texture_depth_2d_array;
 @group(1) @binding(1) var shadowSampler: sampler_comparison;
 
 @group(2) @binding(0) var floorTex: texture_2d<f32>;
@@ -62,7 +62,7 @@ fn vs_main(input: VSIn) -> VSOut {
   return out;
 }
 
-fn shadowVisibilityFloor(lightSpacePos: vec4<f32>) -> f32 {
+fn shadowVisibilityFloor(lightSpacePos: vec4<f32>, lightIndex: i32) -> f32 {
   let sample = makeShadowSample(lightSpacePos, shadowBias(u.shadowParams));
   let method = shadowMethodIndex(shading);
 
@@ -98,7 +98,7 @@ fn shadowVisibilityFloor(lightSpacePos: vec4<f32>) -> f32 {
   for (var i = 0; i < 16; i = i + 1) {
     if (i < maxSamples) {
       let offset = POISSON_16[i] * radius * invSize;
-      shadow += textureSampleCompare(shadowMap, shadowSampler, sample.uv + offset, sample.depth);
+      shadow += textureSampleCompare(shadowMap, shadowSampler, sample.uv + offset, lightIndex, sample.depth);
     }
   }
   shadow = shadow / f32(maxSamples);
@@ -111,16 +111,17 @@ fn computeLightContributionFloor(
   worldPos: vec3<f32>,
   light: Light,
   isShadowed: bool,
-  lightSpacePos: vec4<f32>
+  lightIndex: i32
 ) -> LightContribution {
   let L = computeLightDirection(light, worldPos);
   let lambert = max(dot(N, L), 0.0) * computeSpotFactor(light, worldPos) * computeDistanceFalloff(light, worldPos);
 
   var vis: f32 = 1.0;
-  if (isShadowed) {
+  if (isShadowed && lightIndex >= 0) {
+    let lsMat = shadowMats.mats[lightIndex];
     let biasedWorldPos = worldPos + N * receiverNormalBias(N, L, u.shadowParams);
-    let biasedLightSpacePos = u.lightViewProj * vec4<f32>(biasedWorldPos, 1.0);
-    let rawVisibility = shadowVisibilityFloor(biasedLightSpacePos);
+    let biasedLightSpacePos = lsMat * vec4<f32>(biasedWorldPos, 1.0);
+    let rawVisibility = shadowVisibilityFloor(biasedLightSpacePos, lightIndex);
     vis = mixShadowStrength(rawVisibility, shading.shadowStrength);
   }
 
@@ -165,18 +166,18 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   let lightCount = i32(round(lightsData.count));
   var diffuseSum: vec3<f32> = vec3<f32>(0.0);
   var visibilitySum: f32 = 0.0;
-  let caster = i32(round(shading.shadowCaster0));
 
   for (var i = 0; i < lightCount; i = i + 1) {
     let light = lightsData.lights[i];
-    let isShadowed = (i == caster);
+    let lightIndex = i32(round(light.shadowIndex));
+    let isShadowed = lightIndex >= 0;
 
     let contrib = computeLightContributionFloor(
       N,
       worldPos,
       light,
       isShadowed,
-      input.lightSpacePos
+      lightIndex
     );
     diffuseSum = diffuseSum + contrib.diffuse;
     visibilitySum = visibilitySum + contrib.visibility;

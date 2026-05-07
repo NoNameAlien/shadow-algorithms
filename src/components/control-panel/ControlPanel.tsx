@@ -47,8 +47,6 @@ export function ControlPanel({
   onShowLightBeamChange,
   lightColor,
   onLightColorChange,
-  lightCastShadows,
-  onLightCastShadowsChange,
   spotInnerConeDeg,
   onSpotInnerConeDegChange,
   spotOuterConeDeg,
@@ -217,8 +215,6 @@ export function ControlPanel({
         onShowLightBeamChange={onShowLightBeamChange}
         lightColor={lightColor}
         onLightColorChange={onLightColorChange}
-        lightCastShadows={lightCastShadows}
-        onLightCastShadowsChange={onLightCastShadowsChange}
         spotInnerConeDeg={spotInnerConeDeg}
         onSpotInnerConeDegChange={onSpotInnerConeDegChange}
         spotOuterConeDeg={spotOuterConeDeg}

@@ -11,7 +11,6 @@ type Props = {
   lightMode: LightMode;
   lightIntensity: number;
   lightColor: string;
-  lightCastShadows: boolean;
   showLightBeam: boolean;
   spotInnerConeDeg: number;
   spotOuterConeDeg: number;
@@ -20,7 +19,6 @@ type Props = {
   onLightModeChange: (mode: LightMode) => void;
   onLightIntensityChange: (value: number) => void;
   onLightColorChange: (hex: string) => void;
-  onLightCastShadowsChange: (value: boolean) => void;
   onShowLightBeamChange: (value: boolean) => void;
   onSpotInnerConeDegChange: (value: number) => void;
   onSpotOuterConeDegChange: (value: number) => void;
@@ -34,7 +32,6 @@ export function LightSettingsSection({
   lightMode,
   lightIntensity,
   lightColor,
-  lightCastShadows,
   showLightBeam,
   spotInnerConeDeg,
   spotOuterConeDeg,
@@ -43,7 +40,6 @@ export function LightSettingsSection({
   onLightModeChange,
   onLightIntensityChange,
   onLightColorChange,
-  onLightCastShadowsChange,
   onShowLightBeamChange,
   onSpotInnerConeDegChange,
   onSpotOuterConeDegChange,
@@ -122,16 +118,6 @@ export function LightSettingsSection({
 
         {detailsOpen ? (
           <div style={{ marginTop: 8 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4 }}>
-              <input
-                type="checkbox"
-                checked={lightCastShadows}
-                onChange={(event) => onLightCastShadowsChange(event.target.checked)}
-              />
-              {lang === 'ru' ? 'Этот источник кидает тени' : 'This light casts shadows'}
-              <HelpMark text={lang === 'ru' ? 'Источник будет участвовать в расчетах shadow map.' : 'This light contributes to shadow map rendering.'} />
-            </label>
-
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: lightMode === 'spot' ? 8 : 0 }}>
               <input
                 type="checkbox"

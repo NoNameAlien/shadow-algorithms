@@ -50,19 +50,44 @@ import type {
 
 export type { LightMode, PerformanceMetrics, ShadowDebugMode, ShadowMethod } from "./types";
 
-const MAX_LIGHTS = 16;
+const MAX_LIGHTS = 8;
+const MAX_SHADOW_SLOTS = 8;
+const SHADOW_MATS_HEADER_FLOATS = 8;
+const LIGHT_STRUCT_FLOATS = 16;
+const LIGHT_OFFSETS = {
+  posX: 0,
+  posY: 1,
+  posZ: 2,
+  type: 3,
+  yaw: 4,
+  pitch: 5,
+  intensity: 6,
+  shadowIndex: 7,
+  colorR: 8,
+  colorG: 9,
+  colorB: 10,
+  innerConeDeg: 11,
+  outerConeDeg: 12,
+  range: 13,
+  falloff: 14,
+} as const;
 
 type ObjectDrawState = {
   mainUniformBuf: GPUBuffer;
-  shadowUniformBuf0: GPUBuffer;
-  shadowUniformBuf1: GPUBuffer;
+  shadowUniformBufs: GPUBuffer[];
   objectParamsBuf: GPUBuffer;
   mainBindGroup: GPUBindGroup;
-  shadowBindGroup0: GPUBindGroup;
-  shadowBindGroup1: GPUBindGroup;
-  vsmMomentsBindGroup: GPUBindGroup;
-  debugShadowDepthBindGroup0: GPUBindGroup;
-  debugShadowDepthBindGroup1: GPUBindGroup;
+  shadowBindGroups: GPUBindGroup[];
+  vsmMomentsBindGroups: GPUBindGroup[];
+  debugShadowDepthBindGroups: GPUBindGroup[];
+};
+
+type ShadowSlot = {
+  slotIndex: number;
+  lightIndex: number;
+  lightViewProj: mat4;
+  depthView: GPUTextureView;
+  debugView: GPUTextureView;
 };
 
 export class Renderer {
@@ -95,8 +120,7 @@ export class Renderer {
   private shadowSize = 2048;
   private shadowTex!: GPUTexture;
   private shadowView!: GPUTextureView;
-  private shadowTex1!: GPUTexture;
-  private shadowView1!: GPUTextureView;
+  private shadowLayerViews: GPUTextureView[] = [];
   private shadowSampler!: GPUSampler; // общий sampler_comparison
   private shadowDebugSampler!: GPUSampler;
   private shadowDebugTex!: GPUTexture;
@@ -107,8 +131,10 @@ export class Renderer {
   // VSM текстуры
   private vsmMomentsTex!: GPUTexture;
   private vsmMomentsView!: GPUTextureView;
+  private vsmMomentsLayerViews: GPUTextureView[] = [];
   private vsmBlurTex!: GPUTexture;
   private vsmBlurView!: GPUTextureView;
+  private vsmBlurLayerViews: GPUTextureView[] = [];
   private vsmSampler!: GPUSampler;
 
   private lightBeamPipeline!: GPURenderPipeline;
@@ -252,7 +278,7 @@ export class Renderer {
   private lightBeamDirty = true;
 
   private tempShadingData = new Float32Array(24);
-  private tempShadowMats = new Float32Array(40);
+  private tempShadowMats = new Float32Array(SHADOW_MATS_HEADER_FLOATS + MAX_SHADOW_SLOTS * 16);
   private tempGridParams = new Float32Array(12);
   private tempLightsData = new Float32Array(8 + MAX_LIGHTS * 16);
   private tempAxisUniform = new Float32Array(16 * 3 + 4 * 3);
@@ -263,7 +289,7 @@ export class Renderer {
   private tempLightBeamVertices = new Float32Array(6);
   private tempZeroBeamVertices = new Float32Array(6);
   private lastShadingData = new Float32Array(24);
-  private lastShadowMats = new Float32Array(40);
+  private lastShadowMats = new Float32Array(SHADOW_MATS_HEADER_FLOATS + MAX_SHADOW_SLOTS * 16);
   private lastGridParams = new Float32Array(12);
   private lastLightsData = new Float32Array(8 + MAX_LIGHTS * 16);
   private lastUniformViewProj = new Float32Array(16);
@@ -285,8 +311,7 @@ export class Renderer {
   private tempProjection = mat4.create();
   private tempLightView = mat4.create();
   private tempLightProj = mat4.create();
-  private tempLightViewProj0 = mat4.create();
-  private tempLightViewProj1 = mat4.create();
+  private tempLightViewProjs = Array.from({ length: MAX_SHADOW_SLOTS }, () => mat4.create());
   private tempObjectModel = mat4.create();
   private tempAxisModel = mat4.create();
   private tempLightDirNorm = vec3.create();
@@ -325,13 +350,22 @@ export class Renderer {
 
   // Добавить новый источник (возвращает его индекс)
   addLight(def?: Partial<LightDef>): number {
+    if (this.lights.length >= MAX_LIGHTS) {
+      console.warn(`Можно добавить не больше ${MAX_LIGHTS} источников света`);
+      return this.activeLightIndex;
+    }
+
     const light = createLight({
       def: {
         ...def,
         name: def?.name ?? `Light ${this.lights.length + 1}`,
+        castShadows: true,
       },
       objectPos: this.objectPos,
     });
+    if (light.type === "spot" && def?.yaw === undefined && def?.pitch === undefined) {
+      this.pointSpotLightAtSceneTarget(light);
+    }
     this.lights.push(light);
     this.markLightDataDirty();
     const idx = this.lights.length - 1;
@@ -404,7 +438,7 @@ export class Renderer {
 
   importScene(scene: SceneDTO) {
     // Свет
-    this.lights = lightsFromDTO(scene.lights);
+    this.lights = lightsFromDTO(scene.lights).slice(0, MAX_LIGHTS);
 
     if (this.lights.length === 0) {
       this.initDefaultLights();
@@ -608,9 +642,16 @@ export class Renderer {
     this.lightMode = mode;
     const l = this.lights[this.activeLightIndex];
     if (l) {
+      const previousMode = l.type;
       l.type = mode;
+      if (mode === "spot" && previousMode !== "spot") {
+        this.pointSpotLightAtSceneTarget(l);
+        this.spotYaw = l.yaw;
+        this.spotPitch = l.pitch;
+      }
       this.lightBeamDirty = true;
       this.markLightDataDirty();
+      this.updateLightViewProj();
     }
   }
 
@@ -694,22 +735,109 @@ export class Renderer {
 
   private getShadowCasters(max: number): number[] {
     const result: number[] = [];
-    let hasSunCaster = false;
 
     for (let i = 0; i < this.lights.length; i++) {
-      const light = this.lights[i];
-      if (!light.castShadows) continue;
-
-      if (light.type === "sun") {
-        if (hasSunCaster) continue;
-        hasSunCaster = true;
-      }
-
       result.push(i);
       if (result.length >= max) break;
     }
 
     return result;
+  }
+
+  private getMaxShadowSlotsForMethod(): number {
+    return MAX_SHADOW_SLOTS;
+  }
+
+  private getShadowSlotBindGroup(state: ObjectDrawState, slotIndex: number): GPUBindGroup {
+    return state.shadowBindGroups[slotIndex];
+  }
+
+  private getVsmMomentsSlotBindGroup(state: ObjectDrawState, slotIndex: number): GPUBindGroup {
+    return state.vsmMomentsBindGroups[slotIndex];
+  }
+
+  private getDebugShadowSlotBindGroup(state: ObjectDrawState, slotIndex: number): GPUBindGroup {
+    return state.debugShadowDepthBindGroups[slotIndex];
+  }
+
+  private buildShadowSlots(casters: number[]): ShadowSlot[] {
+    for (const lightViewProj of this.tempLightViewProjs) {
+      mat4.identity(lightViewProj);
+    }
+
+    const slots: ShadowSlot[] = [];
+
+    for (let slotIndex = 0; slotIndex < Math.min(casters.length, MAX_SHADOW_SLOTS); slotIndex++) {
+      const lightIndex = casters[slotIndex];
+      const lightViewProj = this.tempLightViewProjs[slotIndex];
+      this.computeLightViewProjFor(lightIndex, lightViewProj);
+      const slot: ShadowSlot = {
+        slotIndex,
+        lightIndex,
+        lightViewProj,
+        depthView: this.shadowLayerViews[slotIndex],
+        debugView: slotIndex === 1 ? this.shadowDebugView1 : this.shadowDebugView,
+      };
+      slots.push(slot);
+    }
+
+    return slots;
+  }
+
+  private writeShadowMatrices(slots: ShadowSlot[]) {
+    const shadowMats = this.tempShadowMats;
+    shadowMats.fill(0);
+    shadowMats[0] = slots.length;
+
+    for (const slot of slots) {
+      shadowMats.set(slot.lightViewProj, SHADOW_MATS_HEADER_FLOATS + slot.slotIndex * 16);
+    }
+
+    if (
+      this.writeBufferIfChanged(
+        this.shadowMatsBuf,
+        shadowMats,
+        this.lastShadowMats,
+        this.shadowMatsBufferDirty,
+      )
+    ) {
+      this.shadowMatsBufferDirty = false;
+    }
+  }
+
+  private renderShadowDepthSlot(
+    encoder: GPUCommandEncoder,
+    slot: ShadowSlot,
+    debugShadowDepth: boolean,
+  ) {
+    const shadowPass = encoder.beginRenderPass({
+      colorAttachments: [],
+      depthStencilAttachment: {
+        view: slot.depthView,
+        depthClearValue: 1.0,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+      },
+    });
+    shadowPass.setPipeline(this.shadowPipeline);
+
+    for (let i = 0; i < this.objects.length; i++) {
+      const obj = this.objects[i];
+      if (!obj.castShadows) continue;
+
+      const state = this.objectDrawStates[i];
+      const mesh = this.getMesh(obj.meshId);
+      shadowPass.setBindGroup(0, this.getShadowSlotBindGroup(state, slot.slotIndex));
+      shadowPass.setVertexBuffer(0, mesh.vbo);
+      shadowPass.setIndexBuffer(mesh.ibo, "uint16");
+      shadowPass.drawIndexed(mesh.indexCount);
+    }
+
+    shadowPass.end();
+
+    if (debugShadowDepth) {
+      this.renderShadowDebugDepthPass(encoder, slot.debugView, slot.slotIndex);
+    }
   }
 
   private initDefaultLights() {
@@ -804,14 +932,15 @@ export class Renderer {
   private createObjectDrawState(currentPipeline: GPURenderPipeline): ObjectDrawState {
     const { device } = this.gpu;
     const mainUniformBuf = this.createObjectUniformBuffer();
-    const shadowUniformBuf0 = this.createObjectUniformBuffer();
-    const shadowUniformBuf1 = this.createObjectUniformBuffer();
+    const shadowUniformBufs = Array.from(
+      { length: MAX_SHADOW_SLOTS },
+      () => this.createObjectUniformBuffer(),
+    );
     const objectParamsBuf = this.createObjectParamsBuffer();
 
     return {
       mainUniformBuf,
-      shadowUniformBuf0,
-      shadowUniformBuf1,
+      shadowUniformBufs,
       objectParamsBuf,
       mainBindGroup: device.createBindGroup({
         layout: currentPipeline.getBindGroupLayout(0),
@@ -821,39 +950,36 @@ export class Renderer {
           { binding: 2, resource: { buffer: this.shadowMatsBuf } },
         ],
       }),
-      shadowBindGroup0: device.createBindGroup({
-        label: "object shadow pass uniforms bind group 0",
-        layout: this.shadowPipeline.getBindGroupLayout(0),
-        entries: [{ binding: 0, resource: { buffer: shadowUniformBuf0 } }],
-      }),
-      shadowBindGroup1: device.createBindGroup({
-        label: "object shadow pass uniforms bind group 1",
-        layout: this.shadowPipeline.getBindGroupLayout(0),
-        entries: [{ binding: 0, resource: { buffer: shadowUniformBuf1 } }],
-      }),
-      vsmMomentsBindGroup: device.createBindGroup({
-        label: "object vsm moments uniforms bind group",
-        layout: this.vsmMomentsPipeline.getBindGroupLayout(0),
-        entries: [{ binding: 0, resource: { buffer: shadowUniformBuf0 } }],
-      }),
-      debugShadowDepthBindGroup0: device.createBindGroup({
-        label: "object debug shadow depth uniforms bind group 0",
-        layout: this.debugShadowDepthPipeline.getBindGroupLayout(0),
-        entries: [{ binding: 0, resource: { buffer: shadowUniformBuf0 } }],
-      }),
-      debugShadowDepthBindGroup1: device.createBindGroup({
-        label: "object debug shadow depth uniforms bind group 1",
-        layout: this.debugShadowDepthPipeline.getBindGroupLayout(0),
-        entries: [{ binding: 0, resource: { buffer: shadowUniformBuf1 } }],
-      }),
+      shadowBindGroups: shadowUniformBufs.map((buffer, index) =>
+        device.createBindGroup({
+          label: `object shadow pass uniforms bind group ${index}`,
+          layout: this.shadowPipeline.getBindGroupLayout(0),
+          entries: [{ binding: 0, resource: { buffer } }],
+        }),
+      ),
+      vsmMomentsBindGroups: shadowUniformBufs.map((buffer, index) =>
+        device.createBindGroup({
+          label: `object vsm moments uniforms bind group ${index}`,
+          layout: this.vsmMomentsPipeline.getBindGroupLayout(0),
+          entries: [{ binding: 0, resource: { buffer } }],
+        }),
+      ),
+      debugShadowDepthBindGroups: shadowUniformBufs.map((buffer, index) =>
+        device.createBindGroup({
+          label: `object debug shadow depth uniforms bind group ${index}`,
+          layout: this.debugShadowDepthPipeline.getBindGroupLayout(0),
+          entries: [{ binding: 0, resource: { buffer } }],
+        }),
+      ),
     };
   }
 
   private destroyObjectDrawStates() {
     for (const state of this.objectDrawStates) {
       state.mainUniformBuf.destroy();
-      state.shadowUniformBuf0.destroy();
-      state.shadowUniformBuf1.destroy();
+      for (const buffer of state.shadowUniformBufs) {
+        buffer.destroy();
+      }
       state.objectParamsBuf.destroy();
     }
     this.objectDrawStates = [];
@@ -1486,15 +1612,13 @@ export class Renderer {
 
   private createShadowResources() {
     const { device } = this.gpu;
-    const resources = createShadowResourceSet(device, this.shadowSize, {
+    const resources = createShadowResourceSet(device, this.shadowSize, MAX_SHADOW_SLOTS, {
       shadowTex: this.shadowTex,
-      shadowTex1: this.shadowTex1,
     });
 
     this.shadowTex = resources.shadowTex;
     this.shadowView = resources.shadowView;
-    this.shadowTex1 = resources.shadowTex1;
-    this.shadowView1 = resources.shadowView1;
+    this.shadowLayerViews = resources.shadowLayerViews;
     this.shadowSampler = resources.shadowSampler;
     this.shadowDebugSampler = resources.shadowSamplerLinear;
 
@@ -1538,15 +1662,22 @@ export class Renderer {
 
   private createVSMResources() {
     const { device } = this.gpu;
-    const resources = createVSMResourceSet(device, this.shadowSize, {
-      vsmMomentsTex: this.vsmMomentsTex,
-      vsmBlurTex: this.vsmBlurTex,
-    });
+    const resources = createVSMResourceSet(
+      device,
+      this.shadowSize,
+      MAX_SHADOW_SLOTS,
+      {
+        vsmMomentsTex: this.vsmMomentsTex,
+        vsmBlurTex: this.vsmBlurTex,
+      },
+    );
 
     this.vsmMomentsTex = resources.vsmMomentsTex;
     this.vsmMomentsView = resources.vsmMomentsView;
+    this.vsmMomentsLayerViews = resources.vsmMomentsLayerViews;
     this.vsmBlurTex = resources.vsmBlurTex;
     this.vsmBlurView = resources.vsmBlurView;
+    this.vsmBlurLayerViews = resources.vsmBlurLayerViews;
     this.vsmSampler = resources.vsmSampler;
 
     console.log("✓ VSM resources created");
@@ -1764,15 +1895,7 @@ export class Renderer {
       currentPipeline = this.pipelinePCSS;
     if (this.shadowParams.method === "VSM") currentPipeline = this.pipelineVSM;
 
-    if (this.shadowParams.method === "PCSS") {
-      this.bindGroup1Main = device.createBindGroup({
-        layout: currentPipeline.getBindGroupLayout(1),
-        entries: [
-          { binding: 0, resource: this.shadowView },
-          { binding: 1, resource: this.shadowSampler },
-        ],
-      });
-    } else if (this.shadowParams.method === "VSM") {
+    if (this.shadowParams.method === "VSM") {
       this.bindGroup1Main = device.createBindGroup({
         layout: currentPipeline.getBindGroupLayout(1),
         entries: [
@@ -1780,19 +1903,20 @@ export class Renderer {
           { binding: 1, resource: this.vsmSampler },
         ],
       });
-    } else if (this.shadowParams.method === "SM") {
-      // SM: две карты теней и два сэмплера (один и тот же)
+    } else if (
+      this.shadowParams.method === "SM" ||
+      this.shadowParams.method === "PCF" ||
+      this.shadowParams.method === "PCSS"
+    ) {
+      // SM/PCF/PCSS: одна depth texture array, layer выбирается через light.shadowIndex.
       this.bindGroup1Main = device.createBindGroup({
         layout: currentPipeline.getBindGroupLayout(1),
         entries: [
           { binding: 0, resource: this.shadowView },
           { binding: 1, resource: this.shadowSampler },
-          { binding: 2, resource: this.shadowView1 },
-          { binding: 3, resource: this.shadowSampler },
         ],
       });
     } else {
-      // PCF: одна карта
       this.bindGroup1Main = device.createBindGroup({
         layout: currentPipeline.getBindGroupLayout(1),
         entries: [
@@ -1832,7 +1956,7 @@ export class Renderer {
       label: "vsm debug overlay bind group",
       layout: this.debugVsmPipeline.getBindGroupLayout(0),
       entries: [
-        { binding: 0, resource: this.vsmBlurView },
+        { binding: 0, resource: this.vsmBlurLayerViews[0] ?? this.vsmBlurView },
         { binding: 1, resource: this.vsmSampler },
       ],
     });
@@ -1998,6 +2122,21 @@ export class Renderer {
     vec3.normalize(dir, dir);
     vec3.scaleAndAdd(target, light.pos, dir, 10.0);
     return target;
+  }
+
+  private pointSpotLightAtSceneTarget(light: LightDef) {
+    const target = this.objectPos;
+    const dir = vec3.subtract(this.tempLightBeamDir, target, light.pos);
+    const len = vec3.length(dir);
+    if (len < 0.001) {
+      light.yaw = 0;
+      light.pitch = -Math.PI / 4;
+      return;
+    }
+
+    vec3.scale(dir, dir, 1 / len);
+    light.yaw = Math.atan2(dir[0], dir[2]);
+    light.pitch = Math.asin(Math.max(-0.99, Math.min(0.99, dir[1])));
   }
 
   private updateLightBeamGeometry() {
@@ -2257,7 +2396,6 @@ export class Renderer {
     this.stop();
     if (this.depthTex) this.depthTex.destroy();
     if (this.shadowTex) this.shadowTex.destroy();
-    if (this.shadowTex1) this.shadowTex1.destroy();
     if (this.shadowDebugTex) this.shadowDebugTex.destroy();
     if (this.shadowDebugTex1) this.shadowDebugTex1.destroy();
     if (this.vsmMomentsTex) this.vsmMomentsTex.destroy();
@@ -2322,11 +2460,10 @@ export class Renderer {
     const lightModeIndex = this.getLightModeIndex();
     const methodIndex = this.getMethodIndex();
 
-    // Lighting is multi-source, but the current shadow-map path is intentionally single-caster.
-    // Keeping one caster avoids mismatched secondary shadows where objects and floor disagree.
-    const casters = this.getShadowCasters(1);
+    const casters = this.getShadowCasters(this.getMaxShadowSlotsForMethod());
     const caster0 = casters.length > 0 ? casters[0] : -1;
     const caster1 = casters.length > 1 ? casters[1] : -1;
+    const shadowSlots = this.buildShadowSlots(casters);
 
     if (
       caster0 !== this.cachedShadowCaster0 ||
@@ -2335,6 +2472,7 @@ export class Renderer {
       this.cachedShadowCaster0 = caster0;
       this.cachedShadowCaster1 = caster1;
       this.shadingBufferDirty = true;
+      this.lightsBufferDirty = true;
       this.shadowMatsBufferDirty = true;
     }
 
@@ -2371,44 +2509,7 @@ export class Renderer {
       this.shadingBufferDirty = false;
     }
 
-    const lightViewProj0 = this.tempLightViewProj0;
-    const lightViewProj1 = this.tempLightViewProj1;
-
-    mat4.identity(lightViewProj0);
-    mat4.identity(lightViewProj1);
-
-    if (caster0 >= 0) {
-      this.computeLightViewProjFor(caster0, lightViewProj0);
-      mat4.copy(this.lightViewProj, lightViewProj0);
-    }
-
-    if (caster1 >= 0) {
-      this.computeLightViewProjFor(caster1, lightViewProj1);
-    }
-
-    const shadowMats = this.tempShadowMats;
-    shadowMats.fill(0);
-
-    if (caster0 >= 0) {
-      shadowMats[0] = 1.0;
-      shadowMats.set(lightViewProj0, 4);
-    }
-
-    if (caster1 >= 0 && caster0 >= 0) {
-      shadowMats.set(lightViewProj1, 4 + 16);
-      shadowMats[0] = 2.0;
-    }
-
-    if (
-      this.writeBufferIfChanged(
-        this.shadowMatsBuf,
-        shadowMats,
-        this.lastShadowMats,
-        this.shadowMatsBufferDirty,
-      )
-    ) {
-      this.shadowMatsBufferDirty = false;
-    }
+    this.writeShadowMatrices(shadowSlots);
 
     if (this.gridParamsBufferDirty) {
       const gridParams = this.tempGridParams;
@@ -2426,7 +2527,6 @@ export class Renderer {
     }
 
     if (this.lightsBufferDirty) {
-      const lightStructFloats = 16;
       const lightsData = this.tempLightsData;
       lightsData.fill(0);
 
@@ -2435,27 +2535,28 @@ export class Renderer {
 
       for (let i = 0; i < count; i++) {
         const l = this.lights[i];
-        const base = 8 + i * lightStructFloats;
+        const base = 8 + i * LIGHT_STRUCT_FLOATS;
 
-        lightsData[base + 0] = l?.pos[0] ?? this.lightDir[0];
-        lightsData[base + 1] = l?.pos[1] ?? this.lightDir[1];
-        lightsData[base + 2] = l?.pos[2] ?? this.lightDir[2];
-        lightsData[base + 3] =
+        lightsData[base + LIGHT_OFFSETS.posX] = l?.pos[0] ?? this.lightDir[0];
+        lightsData[base + LIGHT_OFFSETS.posY] = l?.pos[1] ?? this.lightDir[1];
+        lightsData[base + LIGHT_OFFSETS.posZ] = l?.pos[2] ?? this.lightDir[2];
+        lightsData[base + LIGHT_OFFSETS.type] =
           (l?.type ?? this.lightMode) === "sun"
             ? 0
             : (l?.type ?? this.lightMode) === "spot"
               ? 1
               : 2;
-        lightsData[base + 4] = l?.yaw ?? this.spotYaw;
-        lightsData[base + 5] = l?.pitch ?? this.spotPitch;
-        lightsData[base + 6] = l?.intensity ?? this.lightIntensity;
-        lightsData[base + 8] = l?.color[0] ?? 1.0;
-        lightsData[base + 9] = l?.color[1] ?? 1.0;
-        lightsData[base + 10] = l?.color[2] ?? 1.0;
-        lightsData[base + 12] = l?.innerConeDeg ?? 15;
-        lightsData[base + 13] = l?.outerConeDeg ?? 28;
-        lightsData[base + 14] = l?.range ?? 12;
-        lightsData[base + 15] = l?.falloff ?? 1.5;
+        lightsData[base + LIGHT_OFFSETS.yaw] = l?.yaw ?? this.spotYaw;
+        lightsData[base + LIGHT_OFFSETS.pitch] = l?.pitch ?? this.spotPitch;
+        lightsData[base + LIGHT_OFFSETS.intensity] = l?.intensity ?? this.lightIntensity;
+        lightsData[base + LIGHT_OFFSETS.shadowIndex] = casters.indexOf(i);
+        lightsData[base + LIGHT_OFFSETS.colorR] = l?.color[0] ?? 1.0;
+        lightsData[base + LIGHT_OFFSETS.colorG] = l?.color[1] ?? 1.0;
+        lightsData[base + LIGHT_OFFSETS.colorB] = l?.color[2] ?? 1.0;
+        lightsData[base + LIGHT_OFFSETS.innerConeDeg] = l?.innerConeDeg ?? 15;
+        lightsData[base + LIGHT_OFFSETS.outerConeDeg] = l?.outerConeDeg ?? 28;
+        lightsData[base + LIGHT_OFFSETS.range] = l?.range ?? 12;
+        lightsData[base + LIGHT_OFFSETS.falloff] = l?.falloff ?? 1.5;
       }
 
       device.queue.writeBuffer(this.lightsBuf, 0, lightsData);
@@ -2614,23 +2715,24 @@ export class Renderer {
       this.fillObjectUniformData(
         uniformData,
         modelMat,
-        lightViewProj0,
+        this.tempLightViewProjs[0],
         lightPos,
         camPos,
         shadowParamsUniform,
       );
       device.queue.writeBuffer(state.mainUniformBuf, 0, uniformData);
-      device.queue.writeBuffer(state.shadowUniformBuf0, 0, uniformData);
 
-      this.fillObjectUniformData(
-        uniformData,
-        modelMat,
-        lightViewProj1,
-        lightPos,
-        camPos,
-        shadowParamsUniform,
-      );
-      device.queue.writeBuffer(state.shadowUniformBuf1, 0, uniformData);
+      for (let slotIndex = 0; slotIndex < MAX_SHADOW_SLOTS; slotIndex++) {
+        this.fillObjectUniformData(
+          uniformData,
+          modelMat,
+          this.tempLightViewProjs[slotIndex],
+          lightPos,
+          camPos,
+          shadowParamsUniform,
+        );
+        device.queue.writeBuffer(state.shadowUniformBufs[slotIndex], 0, uniformData);
+      }
 
       const objParams = this.tempObjParams;
       objParams[0] = obj.color[0];
@@ -2647,7 +2749,12 @@ export class Renderer {
     const encoder = device.createCommandEncoder();
     const debugShadowDepth = this.shadowParams.debugShadowMap !== "off" && this.shadowParams.method !== "VSM";
 
-    if (debugShadowDepth && (caster0 < 0 || (this.shadowParams.method === "SM" && caster1 < 0))) {
+    const supportsSecondaryShadowDebug =
+      this.shadowParams.method === "SM" ||
+      this.shadowParams.method === "PCF" ||
+      this.shadowParams.method === "PCSS";
+
+    if (debugShadowDepth && (caster0 < 0 || (supportsSecondaryShadowDebug && caster1 < 0))) {
       const clearDebugPass = encoder.beginRenderPass({
         colorAttachments: [
           ...(caster0 < 0
@@ -2658,7 +2765,7 @@ export class Renderer {
                 storeOp: "store" as const,
               }]
             : []),
-          ...(this.shadowParams.method === "SM" && caster1 < 0
+          ...(supportsSecondaryShadowDebug && caster1 < 0
             ? [{
                 view: this.shadowDebugView1,
                 clearValue: { r: 1.0, g: 1.0, b: 0.0, a: 1.0 },
@@ -2673,126 +2780,27 @@ export class Renderer {
 
     // Shadow pass
     if (this.shadowParams.method === "VSM") {
-      const vsmPass = encoder.beginRenderPass({
-        colorAttachments: [
-          {
-            view: this.vsmMomentsView,
-            clearValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
-            loadOp: "clear",
-            storeOp: "store",
-          },
-        ],
-        depthStencilAttachment: {
-          view: this.shadowView,
-          depthClearValue: 1.0,
-          depthLoadOp: "clear",
-          depthStoreOp: "store",
-        },
-      });
-      vsmPass.setPipeline(this.vsmMomentsPipeline);
+      for (const slot of shadowSlots) {
+        const momentsView = this.vsmMomentsLayerViews[slot.slotIndex];
+        if (!momentsView) continue;
 
-      for (let i = 0; i < this.objects.length; i++) {
-        const obj = this.objects[i];
-        if (!obj.castShadows) continue;
-
-        const state = this.objectDrawStates[i];
-        const mesh = this.getMesh(obj.meshId);
-        vsmPass.setBindGroup(0, state.vsmMomentsBindGroup);
-        vsmPass.setVertexBuffer(0, mesh.vbo);
-        vsmPass.setIndexBuffer(mesh.ibo, "uint16");
-
-        vsmPass.drawIndexed(mesh.indexCount);
-      }
-
-      vsmPass.end();
-
-      const blurH = encoder.beginComputePass();
-      blurH.setPipeline(this.blurHorizontalPipeline);
-      blurH.setBindGroup(0, this.vsmBlurBindGroup0);
-      const workgroupsX = Math.ceil(this.shadowSize / 8);
-      const workgroupsY = Math.ceil(this.shadowSize / 8);
-      blurH.dispatchWorkgroups(workgroupsX, workgroupsY);
-      blurH.end();
-    } else {
-      // Не VSM: SM / PCF / PCSS
-      if (this.shadowParams.method === "SM") {
-        // PASS 0: caster0 -> shadowView
-        if (caster0 >= 0) {
-          const shadowPass0 = encoder.beginRenderPass({
-            colorAttachments: [],
-            depthStencilAttachment: {
-              view: this.shadowView,
-              depthClearValue: 1.0,
-              depthLoadOp: "clear",
-              depthStoreOp: "store",
+        const vsmPass = encoder.beginRenderPass({
+          colorAttachments: [
+            {
+              view: momentsView,
+              clearValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+              loadOp: "clear",
+              storeOp: "store",
             },
-          });
-          shadowPass0.setPipeline(this.shadowPipeline);
-
-          for (let i = 0; i < this.objects.length; i++) {
-            const obj = this.objects[i];
-            if (!obj.castShadows) continue;
-
-            const state = this.objectDrawStates[i];
-            const mesh = this.getMesh(obj.meshId);
-            shadowPass0.setBindGroup(0, state.shadowBindGroup0);
-            shadowPass0.setVertexBuffer(0, mesh.vbo);
-            shadowPass0.setIndexBuffer(mesh.ibo, "uint16");
-
-            shadowPass0.drawIndexed(mesh.indexCount);
-          }
-
-          shadowPass0.end();
-
-          if (debugShadowDepth) {
-            this.renderShadowDebugDepthPass(encoder, this.shadowDebugView, 0);
-          }
-        }
-
-        // PASS 1: caster1 -> shadowView1
-        if (caster1 >= 0) {
-          const shadowPass1 = encoder.beginRenderPass({
-            colorAttachments: [],
-            depthStencilAttachment: {
-              view: this.shadowView1,
-              depthClearValue: 1.0,
-              depthLoadOp: "clear",
-              depthStoreOp: "store",
-            },
-          });
-          shadowPass1.setPipeline(this.shadowPipeline);
-
-          for (let i = 0; i < this.objects.length; i++) {
-            const obj = this.objects[i];
-            if (!obj.castShadows) continue;
-
-            const state = this.objectDrawStates[i];
-            const mesh = this.getMesh(obj.meshId);
-            shadowPass1.setBindGroup(0, state.shadowBindGroup1);
-            shadowPass1.setVertexBuffer(0, mesh.vbo);
-            shadowPass1.setIndexBuffer(mesh.ibo, "uint16");
-
-            shadowPass1.drawIndexed(mesh.indexCount);
-          }
-
-          shadowPass1.end();
-
-          if (debugShadowDepth) {
-            this.renderShadowDebugDepthPass(encoder, this.shadowDebugView1, 1);
-          }
-        }
-      } else {
-        // PCF / PCSS: один shadow-pass в shadowView (как и раньше)
-        const shadowPass = encoder.beginRenderPass({
-          colorAttachments: [],
+          ],
           depthStencilAttachment: {
-            view: this.shadowView,
+            view: slot.depthView,
             depthClearValue: 1.0,
             depthLoadOp: "clear",
             depthStoreOp: "store",
           },
         });
-          shadowPass.setPipeline(this.shadowPipeline);
+        vsmPass.setPipeline(this.vsmMomentsPipeline);
 
         for (let i = 0; i < this.objects.length; i++) {
           const obj = this.objects[i];
@@ -2800,17 +2808,26 @@ export class Renderer {
 
           const state = this.objectDrawStates[i];
           const mesh = this.getMesh(obj.meshId);
-          shadowPass.setBindGroup(0, state.shadowBindGroup0);
-          shadowPass.setVertexBuffer(0, mesh.vbo);
-          shadowPass.setIndexBuffer(mesh.ibo, "uint16");
+          vsmPass.setBindGroup(0, this.getVsmMomentsSlotBindGroup(state, slot.slotIndex));
+          vsmPass.setVertexBuffer(0, mesh.vbo);
+          vsmPass.setIndexBuffer(mesh.ibo, "uint16");
 
-          shadowPass.drawIndexed(mesh.indexCount);
+          vsmPass.drawIndexed(mesh.indexCount);
         }
-        shadowPass.end();
 
-        if (debugShadowDepth) {
-          this.renderShadowDebugDepthPass(encoder, this.shadowDebugView, 0);
-        }
+        vsmPass.end();
+      }
+
+      const blurH = encoder.beginComputePass();
+      blurH.setPipeline(this.blurHorizontalPipeline);
+      blurH.setBindGroup(0, this.vsmBlurBindGroup0);
+      const workgroupsX = Math.ceil(this.shadowSize / 8);
+      const workgroupsY = Math.ceil(this.shadowSize / 8);
+      blurH.dispatchWorkgroups(workgroupsX, workgroupsY, MAX_SHADOW_SLOTS);
+      blurH.end();
+    } else {
+      for (const slot of shadowSlots) {
+        this.renderShadowDepthSlot(encoder, slot, debugShadowDepth);
       }
     }
 
@@ -2905,7 +2922,7 @@ export class Renderer {
   private renderShadowDebugDepthPass(
     encoder: GPUCommandEncoder,
     targetView: GPUTextureView,
-    shadowBufferIndex: 0 | 1,
+    shadowBufferIndex: number,
   ) {
     const debugPass = encoder.beginRenderPass({
       colorAttachments: [
@@ -2926,12 +2943,7 @@ export class Renderer {
 
       const state = this.objectDrawStates[i];
       const mesh = this.getMesh(obj.meshId);
-      debugPass.setBindGroup(
-        0,
-        shadowBufferIndex === 0
-          ? state.debugShadowDepthBindGroup0
-          : state.debugShadowDepthBindGroup1,
-      );
+      debugPass.setBindGroup(0, this.getDebugShadowSlotBindGroup(state, shadowBufferIndex));
       debugPass.setVertexBuffer(0, mesh.vbo);
       debugPass.setIndexBuffer(mesh.ibo, "uint16");
 
@@ -2945,9 +2957,13 @@ export class Renderer {
     if (this.shadowParams.debugShadowMap === "off") return;
 
     const isVsm = this.shadowParams.method === "VSM";
+    const supportsSecondaryShadowDebug =
+      this.shadowParams.method === "SM" ||
+      this.shadowParams.method === "PCF" ||
+      this.shadowParams.method === "PCSS";
     const bindGroup = isVsm
       ? this.debugVsmBindGroup
-      : this.shadowParams.debugShadowMap === "secondary" && this.shadowParams.method === "SM"
+      : this.shadowParams.debugShadowMap === "secondary" && supportsSecondaryShadowDebug
         ? this.debugShadowSecondaryBindGroup
         : this.debugShadowPrimaryBindGroup;
 
@@ -3288,7 +3304,7 @@ export class Renderer {
     this.activeObjectIndex = 0;
     vec3.copy(this.objectPos, this.objects[0].pos);
 
-    this.lights = preset.lights.map((light, index) =>
+    this.lights = preset.lights.slice(0, MAX_LIGHTS).map((light, index) =>
       createLight({
         objectPos: this.objectPos,
         def: {

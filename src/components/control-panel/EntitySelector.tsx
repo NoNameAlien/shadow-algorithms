@@ -12,6 +12,7 @@ type Props = {
   lang: Lang;
   addTitle: string;
   removeTitle: string;
+  maxCount?: number;
   onSelect: (index: number) => void;
   onAdd: () => void;
   onRemove: () => void;
@@ -27,6 +28,7 @@ export function EntitySelector({
   lang,
   addTitle,
   removeTitle,
+  maxCount,
   onSelect,
   onAdd,
   onRemove,
@@ -51,6 +53,7 @@ export function EntitySelector({
     onRename(editingIndex, draftName);
     setEditingIndex(null);
   };
+  const canAdd = maxCount === undefined || count < maxCount;
 
   return (
     <PanelSection title={`${label} (${count})`} collapsible={false}>
@@ -109,8 +112,15 @@ export function EntitySelector({
         ))}
         <button
           type="button"
-          onClick={onAdd}
-          style={{ ...primaryButtonStyle }}
+          onClick={() => {
+            if (canAdd) onAdd();
+          }}
+          disabled={!canAdd}
+          style={{
+            ...primaryButtonStyle,
+            cursor: canAdd ? 'pointer' : 'not-allowed',
+            opacity: canAdd ? 1 : 0.55
+          }}
           title={addTitle}
         >
           +

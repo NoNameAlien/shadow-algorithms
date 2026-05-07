@@ -12,8 +12,6 @@ type Props = Pick<
   | 'onShowLightBeamChange'
   | 'lightColor'
   | 'onLightColorChange'
-  | 'lightCastShadows'
-  | 'onLightCastShadowsChange'
   | 'spotInnerConeDeg'
   | 'onSpotInnerConeDegChange'
   | 'spotOuterConeDeg'
@@ -45,8 +43,6 @@ export function LightControls({
   onShowLightBeamChange,
   lightColor,
   onLightColorChange,
-  lightCastShadows,
-  onLightCastShadowsChange,
   spotInnerConeDeg,
   onSpotInnerConeDegChange,
   spotOuterConeDeg,
@@ -74,6 +70,7 @@ export function LightControls({
         lang={lang}
         addTitle={lang === 'ru' ? 'Добавить источник' : 'Add light'}
         removeTitle={lang === 'ru' ? 'Удалить источник (кроме первого)' : 'Remove light (except first)'}
+        maxCount={8}
         onSelect={onSelectLight}
         onAdd={onAddLight}
         onRemove={onRemoveLight}
@@ -86,7 +83,6 @@ export function LightControls({
         lightMode={lightMode}
         lightIntensity={lightIntensity}
         lightColor={lightColor}
-        lightCastShadows={lightCastShadows}
         showLightBeam={showLightBeam}
         spotInnerConeDeg={spotInnerConeDeg}
         spotOuterConeDeg={spotOuterConeDeg}
@@ -95,7 +91,6 @@ export function LightControls({
         onLightModeChange={onLightModeChange}
         onLightIntensityChange={onLightIntensityChange}
         onLightColorChange={onLightColorChange}
-        onLightCastShadowsChange={onLightCastShadowsChange}
         onShowLightBeamChange={onShowLightBeamChange}
         onSpotInnerConeDegChange={onSpotInnerConeDegChange}
         onSpotOuterConeDegChange={onSpotOuterConeDegChange}

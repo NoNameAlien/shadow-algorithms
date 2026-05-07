@@ -47,12 +47,11 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   var diffuseSum: vec3<f32> = vec3<f32>(0.0);
   var specularSum: vec3<f32> = vec3<f32>(0.0);
   var visibilitySum: f32 = 0.0;
-  let caster = i32(round(shading.shadowCaster0));
   let receive = objParams.base.w;
 
   for (var i = 0; i < lightCount; i = i + 1) {
     let light = lightsData.lights[i];
-    let isShadowed = (i == caster) && (receive > 0.5);
+    let isShadowed = i32(round(light.shadowIndex)) == 0 && receive > 0.5;
 
     let contrib = computeLightContribution(
       N,

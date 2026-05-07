@@ -10,8 +10,7 @@ export type DepthResource = {
 export type ShadowResources = {
   shadowTex: GPUTexture;
   shadowView: GPUTextureView;
-  shadowTex1: GPUTexture;
-  shadowView1: GPUTextureView;
+  shadowLayerViews: GPUTextureView[];
   shadowSampler: GPUSampler;
   shadowSamplerLinear: GPUSampler;
 };
@@ -19,8 +18,10 @@ export type ShadowResources = {
 export type VSMResources = {
   vsmMomentsTex: GPUTexture;
   vsmMomentsView: GPUTextureView;
+  vsmMomentsLayerViews: GPUTextureView[];
   vsmBlurTex: GPUTexture;
   vsmBlurView: GPUTextureView;
+  vsmBlurLayerViews: GPUTextureView[];
   vsmSampler: GPUSampler;
 };
 
@@ -66,28 +67,29 @@ export function createDepthResource(
 export function createShadowResources(
   device: GPUDevice,
   shadowSize: number,
-  previous?: Partial<Pick<ShadowResources, 'shadowTex' | 'shadowTex1'>>
+  layerCount: number,
+  previous?: Partial<Pick<ShadowResources, 'shadowTex'>>
 ): ShadowResources {
   previous?.shadowTex?.destroy();
-  previous?.shadowTex1?.destroy();
 
   const shadowTex = device.createTexture({
-    size: [shadowSize, shadowSize],
+    size: { width: shadowSize, height: shadowSize, depthOrArrayLayers: layerCount },
     format: 'depth32float',
     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
   });
 
-  const shadowTex1 = device.createTexture({
-    size: [shadowSize, shadowSize],
-    format: 'depth32float',
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
-  });
+  const shadowLayerViews = Array.from({ length: layerCount }, (_, index) =>
+    shadowTex.createView({
+      dimension: '2d',
+      baseArrayLayer: index,
+      arrayLayerCount: 1
+    })
+  );
 
   return {
     shadowTex,
-    shadowView: shadowTex.createView(),
-    shadowTex1,
-    shadowView1: shadowTex1.createView(),
+    shadowView: shadowTex.createView({ dimension: '2d-array' }),
+    shadowLayerViews,
     shadowSampler: device.createSampler({
       compare: 'less',
       magFilter: 'linear',
@@ -103,13 +105,14 @@ export function createShadowResources(
 export function createVSMResources(
   device: GPUDevice,
   shadowSize: number,
+  layerCount: number,
   previous?: Partial<Pick<VSMResources, 'vsmMomentsTex' | 'vsmBlurTex'>>
 ): VSMResources {
   previous?.vsmMomentsTex?.destroy();
   previous?.vsmBlurTex?.destroy();
 
   const vsmMomentsTex = device.createTexture({
-    size: [shadowSize, shadowSize],
+    size: { width: shadowSize, height: shadowSize, depthOrArrayLayers: layerCount },
     format: 'rgba16float',
     usage:
       GPUTextureUsage.RENDER_ATTACHMENT |
@@ -118,16 +121,33 @@ export function createVSMResources(
   });
 
   const vsmBlurTex = device.createTexture({
-    size: [shadowSize, shadowSize],
+    size: { width: shadowSize, height: shadowSize, depthOrArrayLayers: layerCount },
     format: 'rgba16float',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING
   });
 
+  const vsmMomentsLayerViews = Array.from({ length: layerCount }, (_, index) =>
+    vsmMomentsTex.createView({
+      dimension: '2d',
+      baseArrayLayer: index,
+      arrayLayerCount: 1
+    })
+  );
+  const vsmBlurLayerViews = Array.from({ length: layerCount }, (_, index) =>
+    vsmBlurTex.createView({
+      dimension: '2d',
+      baseArrayLayer: index,
+      arrayLayerCount: 1
+    })
+  );
+
   return {
     vsmMomentsTex,
-    vsmMomentsView: vsmMomentsTex.createView(),
+    vsmMomentsView: vsmMomentsTex.createView({ dimension: '2d-array' }),
+    vsmMomentsLayerViews,
     vsmBlurTex,
-    vsmBlurView: vsmBlurTex.createView(),
+    vsmBlurView: vsmBlurTex.createView({ dimension: '2d-array' }),
+    vsmBlurLayerViews,
     vsmSampler: device.createSampler({
       magFilter: 'linear',
       minFilter: 'linear',
@@ -153,7 +173,7 @@ export function createBufferFromData(
 
 export function createUniformBuffers(device: GPUDevice): UniformBuffers {
   const uniformSize = 16 * 4 * 3 + 4 * 4 * 3;
-  const maxLights = 16;
+  const maxLights = 8;
   const lightStructFloats = 16;
   const lightsBufferSize = (8 + maxLights * lightStructFloats) * 4;
 
@@ -179,7 +199,7 @@ export function createUniformBuffers(device: GPUDevice): UniformBuffers {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     shadowMatsBuf: device.createBuffer({
-      size: 160,
+      size: (8 + 8 * 16) * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     lightsBuf: device.createBuffer({

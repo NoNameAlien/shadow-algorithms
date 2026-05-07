@@ -27,7 +27,6 @@ type LightPanelState = {
   mode: LightMode;
   intensity: number;
   color: string;
-  castShadows: boolean;
   innerConeDeg: number;
   outerConeDeg: number;
   range: number;
@@ -38,7 +37,6 @@ const DEFAULT_LIGHT_STATE: LightPanelState = {
   mode: 'sun',
   intensity: 1.0,
   color: '#ffffff',
-  castShadows: true,
   innerConeDeg: 15,
   outerConeDeg: 28,
   range: 12,
@@ -95,7 +93,6 @@ const sameLightState = (left: LightPanelState, right: LightPanelState) =>
   left.mode === right.mode &&
   left.intensity === right.intensity &&
   left.color === right.color &&
-  left.castShadows === right.castShadows &&
   left.innerConeDeg === right.innerConeDeg &&
   left.outerConeDeg === right.outerConeDeg &&
   left.range === right.range &&
@@ -150,7 +147,6 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       mode: lightInfo.mode,
       intensity: lightInfo.intensity,
       color: rgb01ToHex(lightInfo.color),
-      castShadows: lightInfo.castShadows,
       innerConeDeg: lightInfo.innerConeDeg,
       outerConeDeg: lightInfo.outerConeDeg,
       range: lightInfo.range,
@@ -271,11 +267,6 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
     runRendererCommand((renderer) => renderer.setLightColor(hexToRgb01(hex)));
   };
 
-  const handleLightCastShadowsChange = (value: boolean) => {
-    setLightState((previous) => ({ ...previous, castShadows: value }));
-    runRendererCommand((renderer) => renderer.setActiveLightCastShadows(value));
-  };
-
   const handleSpotInnerConeDegChange = (value: number) => {
     setLightState((previous) => ({ ...previous, innerConeDeg: value }));
     runRendererCommand((renderer) => renderer.setActiveLightSpotInnerCone(value));
@@ -345,6 +336,7 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   };
 
   const handleAddLight = () => {
+    if (lightMeta.count >= 8) return;
     runRendererCommand((renderer) => renderer.addLight());
   };
 
@@ -456,8 +448,6 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       onShowLightBeamChange: handleShowLightBeamChange,
       lightColor: lightState.color,
       onLightColorChange: handleLightColorChange,
-      lightCastShadows: lightState.castShadows,
-      onLightCastShadowsChange: handleLightCastShadowsChange,
       spotInnerConeDeg: lightState.innerConeDeg,
       onSpotInnerConeDegChange: handleSpotInnerConeDegChange,
       spotOuterConeDeg: lightState.outerConeDeg,

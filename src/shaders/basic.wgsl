@@ -1,20 +1,13 @@
 // @include object_common
 
-@group(1) @binding(0) var shadowMap0: texture_depth_2d;
-@group(1) @binding(1) var shadowSampler0: sampler_comparison;
-@group(1) @binding(2) var shadowMap1: texture_depth_2d;
-@group(1) @binding(3) var shadowSampler1: sampler_comparison;
+@group(1) @binding(0) var shadowMap: texture_depth_2d_array;
+@group(1) @binding(1) var shadowSampler: sampler_comparison;
 
 fn shadowVisibilityIndexed(lightSpacePos: vec4<f32>, lightIndex: i32) -> f32 {
   let sample = makeShadowSample(lightSpacePos, shadowBias(u.shadowParams));
 
-  if (lightIndex == 0) {
-    let shadow = textureSampleCompare(shadowMap0, shadowSampler0, sample.uv, sample.depth);
-    return select(shadow, 1.0, !sample.inBounds);
-  } else {
-    let shadow = textureSampleCompare(shadowMap1, shadowSampler1, sample.uv, sample.depth);
-    return select(shadow, 1.0, !sample.inBounds);
-  }
+  let shadow = textureSampleCompare(shadowMap, shadowSampler, sample.uv, lightIndex, sample.depth);
+  return select(shadow, 1.0, !sample.inBounds);
 }
 
 fn computeLightContribution(
@@ -66,25 +59,13 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   var diffuseSum: vec3<f32> = vec3<f32>(0.0);
   var specularSum: vec3<f32> = vec3<f32>(0.0);
   var visibilitySum: f32 = 0.0;
-  let caster0 = i32(round(shading.shadowCaster0));
-  let caster1 = i32(round(shading.shadowCaster1));
   let receive = objParams.base.w;
 
   for (var i = 0; i < lightCount; i = i + 1) {
     let light = lightsData.lights[i];
 
-    var isShadowed = false;
-    var lightIndex = -1;
-
-    if (receive > 0.5) {
-      if (i == caster0) {
-        isShadowed = true;
-        lightIndex = 0;
-      } else if (i == caster1) {
-        isShadowed = true;
-        lightIndex = 1;
-      }
-    }
+    let lightIndex = i32(round(light.shadowIndex));
+    let isShadowed = receive > 0.5 && lightIndex >= 0;
 
     let contrib = computeLightContribution(N, worldPos, light, isShadowed, lightIndex);
     diffuseSum = diffuseSum + contrib.diffuse;

@@ -10,7 +10,7 @@ export class SphereGenerator {
     const t = (1.0 + Math.sqrt(5.0)) / 2.0;
 
     // 12 вершин икосаэдра
-    let positions = [
+    const positions = [
       -1, t, 0,   1, t, 0,   -1, -t, 0,   1, -t, 0,
       0, -1, t,   0, 1, t,   0, -1, -t,   0, 1, -t,
       t, 0, -1,   t, 0, 1,   -t, 0, -1,   -t, 0, 1

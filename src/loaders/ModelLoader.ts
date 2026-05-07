@@ -7,13 +7,58 @@ export type ModelData = {
   indices: Uint16Array | Uint32Array;
 };
 
+type GLTFAccessorType = 'SCALAR' | 'VEC2' | 'VEC3';
+
+type GLTFAccessor = {
+  bufferView?: number;
+  byteOffset?: number;
+  componentType: number;
+  count: number;
+  type: GLTFAccessorType;
+};
+
+type GLTFBufferView = {
+  buffer: number;
+  byteOffset?: number;
+  byteStride?: number;
+};
+
+type GLTFExternalBuffer = {
+  arrayBuffer: ArrayBuffer;
+  byteOffset: number;
+  byteLength: number;
+};
+
+type GLTFPrimitive = {
+  attributes?: {
+    POSITION?: number;
+    NORMAL?: number;
+  };
+  indices?: number;
+};
+
+type GLTFMesh = {
+  primitives?: GLTFPrimitive[];
+};
+
+type GLTFJson = {
+  meshes?: GLTFMesh[];
+  accessors?: GLTFAccessor[];
+  bufferViews?: GLTFBufferView[];
+};
+
+type GLTFLoadResult = {
+  json?: GLTFJson;
+  buffers?: GLTFExternalBuffer[];
+};
+
 export class ModelLoader {
   async loadGLTF(url: string): Promise<ModelData> {
     // load() из loaders.gl подтянет JSON и бинарные буферы
-    const gltf: any = await load(url, GLTFLoader);
+    const gltf = await load(url, GLTFLoader) as GLTFLoadResult;
 
     const json = gltf.json;
-    const buffers: ArrayBuffer[] = gltf.buffers || [];
+    const buffers = gltf.buffers || [];
 
     if (!json?.meshes || json.meshes.length === 0) {
       throw new Error('GLTF не содержит mesh данных');
@@ -66,10 +111,10 @@ export class ModelLoader {
   }
 
   private readAccessorAsFloatArray(
-    _json: any,
-    buffers: ArrayBuffer[],
-    bufferViews: any[],
-    accessor: any
+    _json: GLTFJson,
+    buffers: GLTFExternalBuffer[],
+    bufferViews: GLTFBufferView[],
+    accessor: GLTFAccessor
   ): Float32Array {
     const { bufferView: bufferViewIndex, byteOffset = 0, componentType, count, type } = accessor;
 
@@ -100,9 +145,9 @@ export class ModelLoader {
       (() => { throw new Error(`Unsupported componentType for float array: ${componentType}`); })();
 
     const result = new Float32Array(count * numComponents);
-    const baseOffset = viewByteOffset + byteOffset;
+    const baseOffset = buffer.byteOffset + viewByteOffset + byteOffset;
     const stride = byteStride !== 0 ? byteStride : numComponents * componentSize;
-    const dataView = new DataView(buffer, 0, buffer.byteLength);
+    const dataView = new DataView(buffer.arrayBuffer);
 
     for (let i = 0; i < count; i++) {
       const srcOffset = baseOffset + i * stride;
@@ -134,10 +179,10 @@ export class ModelLoader {
   }
 
   private readAccessorAsIndexArray(
-    _json: any,
-    buffers: ArrayBuffer[],
-    bufferViews: any[],
-    accessor: any
+    _json: GLTFJson,
+    buffers: GLTFExternalBuffer[],
+    bufferViews: GLTFBufferView[],
+    accessor: GLTFAccessor
   ): number[] {
     const { bufferView: bufferViewIndex, byteOffset = 0, componentType, count, type } = accessor;
 
@@ -157,22 +202,22 @@ export class ModelLoader {
       throw new Error('GLTF buffer не найден (индексы)');
     }
 
-    const baseOffset = viewByteOffset + byteOffset;
+    const baseOffset = buffer.byteOffset + viewByteOffset + byteOffset;
     const indices: number[] = [];
 
     switch (componentType) {
       case 5123: { // UNSIGNED_SHORT
-        const src = new Uint16Array(buffer, baseOffset, count);
+        const src = new Uint16Array(buffer.arrayBuffer, baseOffset, count);
         for (let i = 0; i < src.length; i++) indices.push(src[i]);
         break;
       }
       case 5125: { // UNSIGNED_INT
-        const src = new Uint32Array(buffer, baseOffset, count);
+        const src = new Uint32Array(buffer.arrayBuffer, baseOffset, count);
         for (let i = 0; i < src.length; i++) indices.push(src[i]);
         break;
       }
       case 5121: { // UNSIGNED_BYTE
-        const src = new Uint8Array(buffer, baseOffset, count);
+        const src = new Uint8Array(buffer.arrayBuffer, baseOffset, count);
         for (let i = 0; i < src.length; i++) indices.push(src[i]);
         break;
       }
@@ -291,9 +336,9 @@ export class ModelLoader {
       const e1x = v1x - v0x, e1y = v1y - v0y, e1z = v1z - v0z;
       const e2x = v2x - v0x, e2y = v2y - v0y, e2z = v2z - v0z;
 
-      let nx = e1y * e2z - e1z * e2y;
-      let ny = e1z * e2x - e1x * e2z;
-      let nz = e1x * e2y - e1y * e2x;
+      const nx = e1y * e2z - e1z * e2y;
+      const ny = e1z * e2x - e1x * e2z;
+      const nz = e1x * e2y - e1y * e2x;
 
       normals[i0 * 3] += nx; normals[i0 * 3 + 1] += ny; normals[i0 * 3 + 2] += nz;
       normals[i1 * 3] += nx; normals[i1 * 3 + 1] += ny; normals[i1 * 3 + 2] += nz;

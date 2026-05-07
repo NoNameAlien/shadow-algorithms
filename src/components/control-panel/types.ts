@@ -96,8 +96,6 @@ export type ControlPanelProps = {
   onObjectReceiveShadowsChange: (value: boolean) => void;
   objectSelfShadows: boolean;
   onObjectSelfShadowsChange: (value: boolean) => void;
-  lightCastShadows: boolean;
-  onLightCastShadowsChange: (value: boolean) => void;
   spotInnerConeDeg: number;
   onSpotInnerConeDegChange: (value: number) => void;
   spotOuterConeDeg: number;

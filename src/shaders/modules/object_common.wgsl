@@ -31,7 +31,7 @@ struct ObjectParams {
 struct ShadowMatrices {
   count: f32,
   _pad0: vec3<f32>,
-  mats: array<mat4x4<f32>, 2>,
+  mats: array<mat4x4<f32>, 8>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;

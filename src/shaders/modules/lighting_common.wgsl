@@ -12,7 +12,7 @@ const LIGHT_DEBUG_DIFFUSE: i32 = 2;
 const LIGHT_DEBUG_SPECULAR: i32 = 3;
 const LIGHT_DEBUG_SHADOW: i32 = 4;
 const LIGHT_DEBUG_NORMALS: i32 = 5;
-const MAX_LIGHTS: u32 = 16u;
+const MAX_LIGHTS: u32 = 8u;
 
 struct ShadingParams {
   shadowStrength: f32,
@@ -37,6 +37,7 @@ struct Light {
   yaw: f32,
   pitch: f32,
   intensity: f32,
+  shadowIndex: f32,
   color: vec3<f32>,
   innerConeDeg: f32,
   outerConeDeg: f32,
@@ -47,7 +48,7 @@ struct Light {
 struct LightsData {
   count: f32,
   _pad0: vec3<f32>,
-  lights: array<Light, 16>,
+  lights: array<Light, 8>,
 };
 
 struct ShadowSample {
@@ -157,8 +158,8 @@ fn computeDistanceFalloff(light: Light, worldPos: vec3<f32>) -> f32 {
   let range = max(light.range, 0.001);
   let dist = distance(light.pos, worldPos);
   let normalized = clamp(dist / range, 0.0, 1.0);
-  let smoothRange = 1.0 - smoothstep(0.82, 1.0, normalized);
-  let distanceCurve = 1.0 / (1.0 + pow(normalized * 2.0, max(light.falloff, 0.01)));
+  let smoothRange = 1.0 - smoothstep(0.92, 1.0, normalized);
+  let distanceCurve = 1.0 / (1.0 + 1.25 * pow(normalized, max(light.falloff, 0.01)));
   return smoothRange * distanceCurve;
 }
 
