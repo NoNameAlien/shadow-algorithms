@@ -44,6 +44,8 @@ struct ShadowMatrices {
 
 @group(1) @binding(0) var shadowMap: texture_depth_2d_array;
 @group(1) @binding(1) var shadowSampler: sampler_comparison;
+@group(1) @binding(2) var momentsTex: texture_2d_array<f32>;
+@group(1) @binding(3) var momentsSampler: sampler;
 
 @group(2) @binding(0) var floorTex: texture_2d<f32>;
 @group(2) @binding(1) var floorSampler: sampler;
@@ -66,6 +68,25 @@ fn shadowVisibilityFloor(lightSpacePos: vec4<f32>, lightIndex: i32) -> f32 {
   let sample = makeShadowSample(lightSpacePos, shadowBias(u.shadowParams));
   let method = shadowMethodIndex(shading);
 
+  if (method == SHADOW_METHOD_VSM) {
+    let unbiasedSample = makeUnbiasedShadowSample(lightSpacePos);
+    let moments = textureSample(momentsTex, momentsSampler, unbiasedSample.uv, lightIndex).rg;
+    let mean = moments.x;
+    let meanSquare = moments.y;
+
+    var visibility: f32 = 1.0;
+    if (unbiasedSample.depth > mean) {
+      let minVariance = shadowBias(u.shadowParams);
+      let variance = max(meanSquare - mean * mean, minVariance);
+      let d = unbiasedSample.depth - mean;
+      let pMax = variance / (variance + d * d);
+      let bleedReduction = shadowParamY(u.shadowParams);
+      visibility = clamp((pMax - bleedReduction) / (1.0 - bleedReduction), 0.0, 1.0);
+    }
+
+    return select(visibility, 1.0, !unbiasedSample.inBounds);
+  }
+
   var radius: f32;
   var samples: i32;
   var invSize: f32;
@@ -80,11 +101,6 @@ fn shadowVisibilityFloor(lightSpacePos: vec4<f32>, lightIndex: i32) -> f32 {
     radius = shadowParamY(u.shadowParams) * 2.0; // pcssLightSize -> width
     samples = 16;
     invSize = shadowTexelSize(u.shadowParams);
-  } else if (method == SHADOW_METHOD_VSM) {
-    // VSM: для пола пока даём мягкий PCF средней силы
-    radius = 1.5;
-    samples = 16;
-    invSize = 1.0 / 2048.0;
   } else {
     // SM: один sample (жёсткие тени)
     radius = 0.0;

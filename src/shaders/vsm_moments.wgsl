@@ -15,25 +15,23 @@ struct Uniforms {
 
 struct VSOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) depth: f32,
 };
 
 @vertex
 fn vs_main(input: VSIn) -> VSOut {
   var out: VSOut;
   let world = u.model * vec4<f32>(input.position, 1.0);
-  let lightSpace = u.lightViewProj * world;
-  out.position = lightSpace;
-  // Линейная глубина в [0,1]
-  out.depth = lightSpace.z / lightSpace.w;
+  out.position = u.lightViewProj * world;
   return out;
 }
 
 @fragment
-fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
-  let depth = input.depth;
+fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
+  let depth = clamp(fragCoord.z, 0.0, 1.0);
+  let dx = dpdx(depth);
+  let dy = dpdy(depth);
   let moment1 = depth;
-  let moment2 = depth * depth;
+  let moment2 = depth * depth + 0.25 * (dx * dx + dy * dy);
   // Храним моменты в RG каналах
   return vec4<f32>(moment1, moment2, 0.0, 1.0);
 }

@@ -12,7 +12,7 @@ import {
   createWallsGeometry,
 } from "./geometryData";
 import { SphereGenerator } from "../geometry/SphereGenerator";
-import { orthoZO } from "./math";
+import { orthoZO, perspectiveZO } from "./math";
 import { createRendererPipelines } from "./pipelines";
 import {
   createBufferFromData,
@@ -33,6 +33,7 @@ import {
 } from "./scene";
 import { projectToScreen, raySphereHit } from "./interaction";
 import { createTextureFromImageFile } from "./textureUtils";
+import { validateSceneDTO } from "../utils/sceneValidation";
 import { SCENE_PRESETS, type ScenePresetId } from "./presets";
 import type {
   GPUCtx,
@@ -123,10 +124,8 @@ export class Renderer {
   private shadowLayerViews: GPUTextureView[] = [];
   private shadowSampler!: GPUSampler; // общий sampler_comparison
   private shadowDebugSampler!: GPUSampler;
-  private shadowDebugTex!: GPUTexture;
-  private shadowDebugView!: GPUTextureView;
-  private shadowDebugTex1!: GPUTexture;
-  private shadowDebugView1!: GPUTextureView;
+  private shadowDebugTextures: GPUTexture[] = [];
+  private shadowDebugViews: GPUTextureView[] = [];
 
   // VSM текстуры
   private vsmMomentsTex!: GPUTexture;
@@ -178,9 +177,8 @@ export class Renderer {
   private axisUniformBuf!: GPUBuffer;
   private bindGroup1Main!: GPUBindGroup;
   private vsmBlurBindGroup0!: GPUBindGroup; // input -> output
-  private debugShadowPrimaryBindGroup!: GPUBindGroup;
-  private debugShadowSecondaryBindGroup!: GPUBindGroup;
-  private debugVsmBindGroup!: GPUBindGroup;
+  private debugShadowBindGroups: GPUBindGroup[] = [];
+  private debugVsmBindGroups: GPUBindGroup[] = [];
 
   private gridParamsBuf!: GPUBuffer;
   private shadingBuf!: GPUBuffer;
@@ -437,8 +435,10 @@ export class Renderer {
   }
 
   importScene(scene: SceneDTO) {
+    const safeScene = validateSceneDTO(scene);
+
     // Свет
-    this.lights = lightsFromDTO(scene.lights).slice(0, MAX_LIGHTS);
+    this.lights = lightsFromDTO(safeScene.lights).slice(0, MAX_LIGHTS);
 
     if (this.lights.length === 0) {
       this.initDefaultLights();
@@ -456,7 +456,10 @@ export class Renderer {
     this.updateLightViewProj();
 
     // Объекты
-    this.objects = objectsFromDTO(scene.objects, this.defaultMeshId);
+    this.objects = objectsFromDTO(safeScene.objects, this.defaultMeshId).map((object) => ({
+      ...object,
+      meshId: this.meshById.has(object.meshId) ? object.meshId : this.defaultMeshId,
+    }));
 
     if (this.objects.length === 0) {
       this.initDefaultObjects();
@@ -467,26 +470,26 @@ export class Renderer {
     // Пол и стены
     vec3.set(
       this.floorColor,
-      scene.floorColor[0],
-      scene.floorColor[1],
-      scene.floorColor[2],
+      safeScene.floorColor[0],
+      safeScene.floorColor[1],
+      safeScene.floorColor[2],
     );
     vec3.set(
       this.wallColor,
-      scene.wallColor[0],
-      scene.wallColor[1],
-      scene.wallColor[2],
+      safeScene.wallColor[0],
+      safeScene.wallColor[1],
+      safeScene.wallColor[2],
     );
     this.markGridParamsDirty();
-    this.showFloor = scene.showFloor;
-    this.showWalls = scene.showWalls;
-    this.floorSize = scene.floorSize ?? 10;
-    this.showGrid = scene.showGrid ?? true;
+    this.showFloor = safeScene.showFloor;
+    this.showWalls = safeScene.showWalls;
+    this.floorSize = safeScene.floorSize ?? 10;
+    this.showGrid = safeScene.showGrid ?? true;
     this.createGrid();
     this.createWalls();
 
     // Параметры теней
-    this.updateShadowParams(scene.shadowParams);
+    this.updateShadowParams(safeScene.shadowParams);
 
     console.log("✓ Scene imported from JSON");
   }
@@ -600,6 +603,20 @@ export class Renderer {
       vec3.set(obj.color, rgb[0], rgb[1], rgb[2]);
       this.markObjectParamsDirty();
     }
+  }
+
+  setActiveObjectScale(scale: [number, number, number]) {
+    const obj = this.objects[this.activeObjectIndex];
+    if (!obj) return;
+
+    vec3.set(
+      obj.scale,
+      Math.max(0.01, Math.min(100, scale[0])),
+      Math.max(0.01, Math.min(100, scale[1])),
+      Math.max(0.01, Math.min(100, scale[2])),
+    );
+    this.shadowMatsBufferDirty = true;
+    this.updateLightViewProj();
   }
 
   setActiveObjectCastShadows(value: boolean) {
@@ -748,6 +765,17 @@ export class Renderer {
     return MAX_SHADOW_SLOTS;
   }
 
+  private getDebugShadowSlotIndex(): number | null {
+    const mode = this.shadowParams.debugShadowMap ?? "off";
+    if (mode === "off") return null;
+    if (mode === "primary") return 0;
+    if (mode === "secondary") return 1;
+
+    const match = /^slot([0-7])$/.exec(mode);
+    if (!match) return 0;
+    return Number(match[1]);
+  }
+
   private getShadowSlotBindGroup(state: ObjectDrawState, slotIndex: number): GPUBindGroup {
     return state.shadowBindGroups[slotIndex];
   }
@@ -776,7 +804,7 @@ export class Renderer {
         lightIndex,
         lightViewProj,
         depthView: this.shadowLayerViews[slotIndex],
-        debugView: slotIndex === 1 ? this.shadowDebugView1 : this.shadowDebugView,
+        debugView: this.shadowDebugViews[slotIndex] ?? this.shadowDebugViews[0],
       };
       slots.push(slot);
     }
@@ -829,7 +857,7 @@ export class Renderer {
       const mesh = this.getMesh(obj.meshId);
       shadowPass.setBindGroup(0, this.getShadowSlotBindGroup(state, slot.slotIndex));
       shadowPass.setVertexBuffer(0, mesh.vbo);
-      shadowPass.setIndexBuffer(mesh.ibo, "uint16");
+      shadowPass.setIndexBuffer(mesh.ibo, mesh.indexFormat);
       shadowPass.drawIndexed(mesh.indexCount);
     }
 
@@ -1622,22 +1650,18 @@ export class Renderer {
     this.shadowSampler = resources.shadowSampler;
     this.shadowDebugSampler = resources.shadowSamplerLinear;
 
-    this.shadowDebugTex?.destroy();
-    this.shadowDebugTex1?.destroy();
-    this.shadowDebugTex = device.createTexture({
-      label: "primary shadow debug color texture",
-      size: [this.shadowSize, this.shadowSize],
-      format: "rgba8unorm",
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-    });
-    this.shadowDebugView = this.shadowDebugTex.createView();
-    this.shadowDebugTex1 = device.createTexture({
-      label: "secondary shadow debug color texture",
-      size: [this.shadowSize, this.shadowSize],
-      format: "rgba8unorm",
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-    });
-    this.shadowDebugView1 = this.shadowDebugTex1.createView();
+    for (const texture of this.shadowDebugTextures) {
+      texture.destroy();
+    }
+    this.shadowDebugTextures = Array.from({ length: MAX_SHADOW_SLOTS }, (_, slotIndex) =>
+      device.createTexture({
+        label: `shadow debug color texture slot ${slotIndex}`,
+        size: [this.shadowSize, this.shadowSize],
+        format: "rgba8unorm",
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      }),
+    );
+    this.shadowDebugViews = this.shadowDebugTextures.map((texture) => texture.createView());
 
     console.log("✓ Shadow resources created");
   }
@@ -1717,6 +1741,7 @@ export class Renderer {
       tbo: this.tbo,
       ibo: this.ibo,
       indexCount: this.indexCount,
+      indexFormat: "uint16",
     };
 
     const beveled = createBeveledCubeGeometry();
@@ -1748,6 +1773,7 @@ export class Renderer {
       tbo: beveledTbo,
       ibo: beveledIbo,
       indexCount: beveled.indices.length,
+      indexFormat: "uint16",
     };
 
     const sphere = SphereGenerator.createIcosphere(1.15, 3);
@@ -1779,6 +1805,7 @@ export class Renderer {
       tbo: sphereTbo,
       ibo: sphereIbo,
       indexCount: sphere.indices.length,
+      indexFormat: "uint16",
     };
 
     this.meshes.push(cubeMesh, beveledMesh, sphereMesh);
@@ -1934,32 +1961,27 @@ export class Renderer {
       ],
     });
 
-    this.debugShadowPrimaryBindGroup = device.createBindGroup({
-      label: "primary shadow debug overlay bind group",
-      layout: this.debugVsmPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: this.shadowDebugView },
-        { binding: 1, resource: this.shadowDebugSampler },
-      ],
-    });
+    this.debugShadowBindGroups = this.shadowDebugViews.map((view, slotIndex) =>
+      device.createBindGroup({
+        label: `shadow debug overlay bind group slot ${slotIndex}`,
+        layout: this.debugVsmPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: view },
+          { binding: 1, resource: this.shadowDebugSampler },
+        ],
+      }),
+    );
 
-    this.debugShadowSecondaryBindGroup = device.createBindGroup({
-      label: "secondary shadow debug overlay bind group",
-      layout: this.debugVsmPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: this.shadowDebugView1 },
-        { binding: 1, resource: this.shadowDebugSampler },
-      ],
-    });
-
-    this.debugVsmBindGroup = device.createBindGroup({
-      label: "vsm debug overlay bind group",
-      layout: this.debugVsmPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: this.vsmBlurLayerViews[0] ?? this.vsmBlurView },
-        { binding: 1, resource: this.vsmSampler },
-      ],
-    });
+    this.debugVsmBindGroups = Array.from({ length: MAX_SHADOW_SLOTS }, (_, slotIndex) =>
+      device.createBindGroup({
+        label: `vsm debug overlay bind group slot ${slotIndex}`,
+        layout: this.debugVsmPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: this.vsmBlurLayerViews[slotIndex] ?? this.vsmBlurView },
+          { binding: 1, resource: this.vsmSampler },
+        ],
+      }),
+    );
 
     this.destroyObjectDrawStates();
 
@@ -1977,6 +1999,8 @@ export class Renderer {
       entries: [
         { binding: 0, resource: this.shadowView },
         { binding: 1, resource: this.shadowSampler },
+        { binding: 2, resource: this.vsmBlurView },
+        { binding: 3, resource: this.vsmSampler },
       ],
     });
 
@@ -2069,11 +2093,7 @@ export class Renderer {
 
     const target = this.getShadowTargetForLight(main);
     mat4.lookAt(this.tempLightView, pos, target, up);
-
-    const size = 8;
-    const near = 1.0;
-    const far = 20.0;
-    orthoZO(this.tempLightProj, -size, size, -size, size, near, far);
+    this.writeLightProjection(main, this.tempLightProj, this.shadowParams.method);
 
     mat4.multiply(this.lightViewProj, this.tempLightProj, this.tempLightView);
 
@@ -2098,14 +2118,26 @@ export class Renderer {
 
     const target = this.getShadowTargetForLight(l);
     mat4.lookAt(this.tempLightView, l.pos, target, up);
+    this.writeLightProjection(l, this.tempLightProj, this.shadowParams.method);
+
+    mat4.multiply(out, this.tempLightProj, this.tempLightView);
+    return out;
+  }
+
+  private writeLightProjection(light: LightDef | undefined, out: mat4, method: ShadowMethod) {
+    if (light?.type === "spot" && method !== "VSM") {
+      const outerConeRad = (Math.max(1, Math.min(70, light.outerConeDeg)) * Math.PI) / 180;
+      const fovY = Math.max(2 * Math.PI / 180, Math.min(140 * Math.PI / 180, outerConeRad * 2));
+      const near = 0.05;
+      const far = Math.max(near + 0.1, light.range);
+      perspectiveZO(out, fovY, 1, near, far);
+      return;
+    }
 
     const size = 8;
     const near = 1.0;
     const far = 20.0;
-    orthoZO(this.tempLightProj, -size, size, -size, size, near, far);
-
-    mat4.multiply(out, this.tempLightProj, this.tempLightView);
-    return out;
+    orthoZO(out, -size, size, -size, size, near, far);
   }
 
   private getShadowTargetForLight(light?: LightDef): vec3 {
@@ -2396,8 +2428,9 @@ export class Renderer {
     this.stop();
     if (this.depthTex) this.depthTex.destroy();
     if (this.shadowTex) this.shadowTex.destroy();
-    if (this.shadowDebugTex) this.shadowDebugTex.destroy();
-    if (this.shadowDebugTex1) this.shadowDebugTex1.destroy();
+    for (const texture of this.shadowDebugTextures) {
+      texture.destroy();
+    }
     if (this.vsmMomentsTex) this.vsmMomentsTex.destroy();
     if (this.vsmBlurTex) this.vsmBlurTex.destroy();
     if (this.vbo) this.vbo.destroy();
@@ -2747,32 +2780,20 @@ export class Renderer {
     }
 
     const encoder = device.createCommandEncoder();
-    const debugShadowDepth = this.shadowParams.debugShadowMap !== "off" && this.shadowParams.method !== "VSM";
-
-    const supportsSecondaryShadowDebug =
-      this.shadowParams.method === "SM" ||
-      this.shadowParams.method === "PCF" ||
-      this.shadowParams.method === "PCSS";
-
-    if (debugShadowDepth && (caster0 < 0 || (supportsSecondaryShadowDebug && caster1 < 0))) {
+    const debugShadowSlotIndex = this.getDebugShadowSlotIndex();
+    const debugShadowDepth = debugShadowSlotIndex !== null && this.shadowParams.method !== "VSM";
+    const shouldClearDebugShadow =
+      debugShadowDepth &&
+      !shadowSlots.some((slot) => slot.slotIndex === debugShadowSlotIndex);
+    if (shouldClearDebugShadow) {
       const clearDebugPass = encoder.beginRenderPass({
         colorAttachments: [
-          ...(caster0 < 0
-            ? [{
-                view: this.shadowDebugView,
-                clearValue: { r: 1.0, g: 1.0, b: 0.0, a: 1.0 },
-                loadOp: "clear" as const,
-                storeOp: "store" as const,
-              }]
-            : []),
-          ...(supportsSecondaryShadowDebug && caster1 < 0
-            ? [{
-                view: this.shadowDebugView1,
-                clearValue: { r: 1.0, g: 1.0, b: 0.0, a: 1.0 },
-                loadOp: "clear" as const,
-                storeOp: "store" as const,
-              }]
-            : []),
+          {
+            view: this.shadowDebugViews[debugShadowSlotIndex ?? 0],
+            clearValue: { r: 1.0, g: 1.0, b: 0.0, a: 1.0 },
+            loadOp: "clear" as const,
+            storeOp: "store" as const,
+          },
         ],
       });
       clearDebugPass.end();
@@ -2788,7 +2809,7 @@ export class Renderer {
           colorAttachments: [
             {
               view: momentsView,
-              clearValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+              clearValue: { r: 1.0, g: 1.0, b: 0.0, a: 1.0 },
               loadOp: "clear",
               storeOp: "store",
             },
@@ -2810,12 +2831,32 @@ export class Renderer {
           const mesh = this.getMesh(obj.meshId);
           vsmPass.setBindGroup(0, this.getVsmMomentsSlotBindGroup(state, slot.slotIndex));
           vsmPass.setVertexBuffer(0, mesh.vbo);
-          vsmPass.setIndexBuffer(mesh.ibo, "uint16");
+          vsmPass.setIndexBuffer(mesh.ibo, mesh.indexFormat);
 
           vsmPass.drawIndexed(mesh.indexCount);
         }
 
         vsmPass.end();
+      }
+
+      if (
+        debugShadowSlotIndex !== null &&
+        !shadowSlots.some((slot) => slot.slotIndex === debugShadowSlotIndex)
+      ) {
+        const emptyMomentsView = this.vsmMomentsLayerViews[debugShadowSlotIndex];
+        if (emptyMomentsView) {
+          const clearVsmDebugPass = encoder.beginRenderPass({
+            colorAttachments: [
+              {
+                view: emptyMomentsView,
+                clearValue: { r: 1.0, g: 1.0, b: 0.0, a: 1.0 },
+                loadOp: "clear",
+                storeOp: "store",
+              },
+            ],
+          });
+          clearVsmDebugPass.end();
+        }
       }
 
       const blurH = encoder.beginComputePass();
@@ -2827,7 +2868,11 @@ export class Renderer {
       blurH.end();
     } else {
       for (const slot of shadowSlots) {
-        this.renderShadowDepthSlot(encoder, slot, debugShadowDepth);
+        this.renderShadowDepthSlot(
+          encoder,
+          slot,
+          debugShadowDepth && slot.slotIndex === debugShadowSlotIndex,
+        );
       }
     }
 
@@ -2871,7 +2916,7 @@ export class Renderer {
       scenePass.setVertexBuffer(0, mesh.vbo);
       scenePass.setVertexBuffer(1, mesh.nbo);
       scenePass.setVertexBuffer(2, mesh.tbo);
-      scenePass.setIndexBuffer(mesh.ibo, "uint16");
+      scenePass.setIndexBuffer(mesh.ibo, mesh.indexFormat);
 
       scenePass.drawIndexed(mesh.indexCount);
     }
@@ -2945,7 +2990,7 @@ export class Renderer {
       const mesh = this.getMesh(obj.meshId);
       debugPass.setBindGroup(0, this.getDebugShadowSlotBindGroup(state, shadowBufferIndex));
       debugPass.setVertexBuffer(0, mesh.vbo);
-      debugPass.setIndexBuffer(mesh.ibo, "uint16");
+      debugPass.setIndexBuffer(mesh.ibo, mesh.indexFormat);
 
       debugPass.drawIndexed(mesh.indexCount);
     }
@@ -2954,18 +2999,14 @@ export class Renderer {
   }
 
   private renderShadowDebugOverlay(encoder: GPUCommandEncoder, frameView: GPUTextureView) {
-    if (this.shadowParams.debugShadowMap === "off") return;
+    const debugShadowSlotIndex = this.getDebugShadowSlotIndex();
+    if (debugShadowSlotIndex === null) return;
 
     const isVsm = this.shadowParams.method === "VSM";
-    const supportsSecondaryShadowDebug =
-      this.shadowParams.method === "SM" ||
-      this.shadowParams.method === "PCF" ||
-      this.shadowParams.method === "PCSS";
     const bindGroup = isVsm
-      ? this.debugVsmBindGroup
-      : this.shadowParams.debugShadowMap === "secondary" && supportsSecondaryShadowDebug
-        ? this.debugShadowSecondaryBindGroup
-        : this.debugShadowPrimaryBindGroup;
+      ? this.debugVsmBindGroups[debugShadowSlotIndex]
+      : this.debugShadowBindGroups[debugShadowSlotIndex];
+    if (!bindGroup) return;
 
     const rect = this.canvas.getBoundingClientRect();
     const dprX = rect.width > 0 ? this.canvas.width / rect.width : 1;
@@ -3431,6 +3472,7 @@ export class Renderer {
         tbo: this.tbo,
         ibo,
         indexCount,
+        indexFormat: model.indexFormat,
       };
 
       this.meshes.push(mesh);

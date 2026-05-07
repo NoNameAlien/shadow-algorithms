@@ -2,7 +2,7 @@ import { SHADOW_METHODS } from './constants';
 import { HelpMark, RangeControl, SelectControl } from './FormControls';
 import { PanelSection } from './PanelSection';
 import { colorInputStyle, subtleButtonStyle } from './styles';
-import type { ControlPanelStrings, ShadowParams } from './types';
+import type { ControlPanelStrings, ShadowDebugMode, ShadowParams } from './types';
 
 type Props = {
   params: ShadowParams;
@@ -22,21 +22,26 @@ const hexToRgb = (hex: string): [number, number, number] => {
   ];
 };
 
+const normalizeShadowDebugMode = (mode: ShadowDebugMode | undefined): ShadowDebugMode => {
+  if (mode === 'primary') return 'slot0';
+  if (mode === 'secondary') return 'slot1';
+  return mode ?? 'off';
+};
+
 export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
   const isRu = strings.title === 'Настройки теней';
   const isPCF = params.method === 'PCF';
   const isPCSS = params.method === 'PCSS';
   const isVSM = params.method === 'VSM';
-  const debugShadowMap = params.debugShadowMap === 'secondary' && params.method !== 'SM'
-    ? 'primary'
-    : params.debugShadowMap ?? 'off';
+  const debugShadowMap = normalizeShadowDebugMode(params.debugShadowMap);
   const shadowDebugOptions = [
     { value: 'off' as const, label: isRu ? 'Выкл.' : 'Off' },
-    {
-      value: 'primary' as const,
-      label: isVSM ? 'VSM moments' : 'Primary depth'
-    },
-    ...(params.method === 'SM' ? [{ value: 'secondary' as const, label: isRu ? 'Вторая depth-карта' : 'Secondary depth' }] : [])
+    ...([0, 1, 2, 3, 4, 5, 6, 7] as const).map((slot) => ({
+      value: `slot${slot}` as const,
+      label: isVSM
+        ? `Slot ${slot} moments`
+        : `Slot ${slot} depth`
+    }))
   ];
   const lightDebugOptions = [
     { value: 'final' as const, label: isRu ? 'Итоговый вид' : 'Final' },

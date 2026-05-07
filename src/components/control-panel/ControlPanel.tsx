@@ -76,6 +76,8 @@ export function ControlPanel({
   onExportScreenshot,
   objectColor,
   onObjectColorChange,
+  objectScale,
+  onObjectScaleChange,
   objectCastShadows,
   onObjectCastShadowsChange,
   objectReceiveShadows,
@@ -244,6 +246,8 @@ export function ControlPanel({
         onRenameObject={onRenameObject}
         objectColor={objectColor}
         onObjectColorChange={onObjectColorChange}
+        objectScale={objectScale}
+        onObjectScaleChange={onObjectScaleChange}
         objectCastShadows={objectCastShadows}
         onObjectCastShadowsChange={onObjectCastShadowsChange}
         objectReceiveShadows={objectReceiveShadows}

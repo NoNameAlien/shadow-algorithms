@@ -6,7 +6,8 @@ export type { PerformanceMetrics };
 export type Lang = 'en' | 'ru';
 export type LightMode = 'sun' | 'spot' | 'top';
 export type ShadowMethod = 'SM' | 'PCF' | 'PCSS' | 'VSM';
-export type ShadowDebugMode = 'off' | 'primary' | 'secondary';
+export type ShadowDebugSlot = `slot${0 | 1 | 2 | 3 | 4 | 5 | 6 | 7}`;
+export type ShadowDebugMode = 'off' | 'primary' | 'secondary' | ShadowDebugSlot;
 export type LightDebugMode = 'final' | 'lighting' | 'diffuse' | 'specular' | 'shadow' | 'normals';
 export type ScenePresetSelection = 'custom' | ScenePresetId;
 
@@ -30,6 +31,7 @@ export type ShadowParams = {
 };
 
 export type MeshOption = { id: number; name: string };
+export type ObjectScale = [number, number, number];
 export type ControlPanelStrings = typeof import('./constants').STRINGS[Lang];
 
 export type ControlPanelProps = {
@@ -90,6 +92,8 @@ export type ControlPanelProps = {
   onExportScreenshot?: () => void;
   objectColor: string;
   onObjectColorChange: (hex: string) => void;
+  objectScale: ObjectScale;
+  onObjectScaleChange: (scale: ObjectScale) => void;
   objectCastShadows: boolean;
   onObjectCastShadowsChange: (value: boolean) => void;
   objectReceiveShadows: boolean;

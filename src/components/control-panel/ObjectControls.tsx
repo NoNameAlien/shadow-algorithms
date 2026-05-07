@@ -13,6 +13,8 @@ type Props = Pick<
   | 'onRenameObject'
   | 'objectColor'
   | 'onObjectColorChange'
+  | 'objectScale'
+  | 'onObjectScaleChange'
   | 'objectCastShadows'
   | 'onObjectCastShadowsChange'
   | 'objectReceiveShadows'
@@ -47,6 +49,8 @@ export function ObjectControls({
   onRenameObject,
   objectColor,
   onObjectColorChange,
+  objectScale,
+  onObjectScaleChange,
   objectCastShadows,
   onObjectCastShadowsChange,
   objectReceiveShadows,
@@ -85,6 +89,7 @@ export function ObjectControls({
       <ObjectParamsSection
         lang={lang}
         objectColor={objectColor}
+        objectScale={objectScale}
         meshOptions={meshOptions}
         activeMeshId={activeMeshId}
         objectSpecular={objectSpecular}
@@ -95,6 +100,7 @@ export function ObjectControls({
         objectReceiveShadows={objectReceiveShadows}
         objectSelfShadows={objectSelfShadows}
         onObjectColorChange={onObjectColorChange}
+        onObjectScaleChange={onObjectScaleChange}
         onObjectMeshChange={onObjectMeshChange}
         onObjectSpecularChange={onObjectSpecularChange}
         onObjectShininessChange={onObjectShininessChange}

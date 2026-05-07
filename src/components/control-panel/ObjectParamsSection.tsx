@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { colorInputStyle, subtleButtonStyle } from './styles';
-import type { Lang, MeshOption } from './types';
+import type { Lang, MeshOption, ObjectScale } from './types';
 import { HelpMark, RangeControl, SelectControl } from './FormControls';
 import { PanelSection } from './PanelSection';
 
@@ -15,6 +15,7 @@ type Props = {
   objectColor: string;
   meshOptions: MeshOption[];
   activeMeshId: number;
+  objectScale: ObjectScale;
   objectSpecular: number;
   objectShininess: number;
   objectRoughness: number;
@@ -23,6 +24,7 @@ type Props = {
   objectReceiveShadows: boolean;
   objectSelfShadows: boolean;
   onObjectColorChange: (hex: string) => void;
+  onObjectScaleChange: (scale: ObjectScale) => void;
   onObjectMeshChange: (meshId: number) => void;
   onObjectSpecularChange: (value: number) => void;
   onObjectShininessChange: (value: number) => void;
@@ -76,6 +78,7 @@ export function ObjectParamsSection({
   objectColor,
   meshOptions,
   activeMeshId,
+  objectScale,
   objectSpecular,
   objectShininess,
   objectRoughness,
@@ -84,6 +87,7 @@ export function ObjectParamsSection({
   objectReceiveShadows,
   objectSelfShadows,
   onObjectColorChange,
+  onObjectScaleChange,
   onObjectMeshChange,
   onObjectSpecularChange,
   onObjectShininessChange,
@@ -94,7 +98,14 @@ export function ObjectParamsSection({
   onObjectSelfShadowsChange
 }: Props) {
   const [materialOpen, setMaterialOpen] = useState(false);
+  const [transformOpen, setTransformOpen] = useState(false);
   const [motionOpen, setMotionOpen] = useState(false);
+  const uniformScale = (objectScale[0] + objectScale[1] + objectScale[2]) / 3;
+  const updateScaleAxis = (axis: 0 | 1 | 2, value: number) => {
+    const next: ObjectScale = [...objectScale] as ObjectScale;
+    next[axis] = value;
+    onObjectScaleChange(next);
+  };
 
   return (
     <PanelSection title={lang === 'ru' ? 'Параметры объекта' : 'Object params'} collapsible={false}>
@@ -142,6 +153,53 @@ export function ObjectParamsSection({
           ))}
         </div>
       </div>
+
+      <DetailToggle
+        title={lang === 'ru' ? 'Размер объекта' : 'Object scale'}
+        open={transformOpen}
+        onToggle={() => setTransformOpen((previous) => !previous)}
+      >
+        <RangeControl
+          label={lang === 'ru' ? `Единый масштаб: ${uniformScale.toFixed(2)}` : `Uniform scale: ${uniformScale.toFixed(2)}`}
+          help={lang === 'ru' ? 'Устанавливает одинаковый масштаб по X/Y/Z.' : 'Sets the same scale on X/Y/Z.'}
+          min={0.05}
+          max={10}
+          step={0.05}
+          value={uniformScale}
+          onChange={(value) => onObjectScaleChange([value, value, value])}
+          marginBottom={6}
+        />
+
+        <RangeControl
+          label={`X: ${objectScale[0].toFixed(2)}`}
+          min={0.05}
+          max={10}
+          step={0.05}
+          value={objectScale[0]}
+          onChange={(value) => updateScaleAxis(0, value)}
+          marginBottom={6}
+        />
+
+        <RangeControl
+          label={`Y: ${objectScale[1].toFixed(2)}`}
+          min={0.05}
+          max={10}
+          step={0.05}
+          value={objectScale[1]}
+          onChange={(value) => updateScaleAxis(1, value)}
+          marginBottom={6}
+        />
+
+        <RangeControl
+          label={`Z: ${objectScale[2].toFixed(2)}`}
+          min={0.05}
+          max={10}
+          step={0.05}
+          value={objectScale[2]}
+          onChange={(value) => updateScaleAxis(2, value)}
+          marginBottom={0}
+        />
+      </DetailToggle>
 
       <DetailToggle
         title={lang === 'ru' ? 'Детали материала' : 'Material details'}

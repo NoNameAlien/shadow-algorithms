@@ -32,6 +32,18 @@ const lightIcons: Record<LightMode, string> = {
   top: topIcon
 };
 
+const shadowDebugSlotLabel = (mode: ShadowDebugMode, method: ShadowMethod) => {
+  const slot = mode === 'secondary'
+    ? 1
+    : mode === 'primary'
+      ? 0
+      : mode.startsWith('slot')
+        ? Number(mode.slice(4))
+        : 0;
+
+  return method === 'VSM' ? `Slot ${slot} moments` : `Slot ${slot} depth`;
+};
+
 export function SceneViewport({
   canvasRef,
   lightsScreen,
@@ -43,11 +55,7 @@ export function SceneViewport({
   shadowMethod
 }: Props) {
   const strings = STRINGS[lang];
-  const debugLabel = shadowMethod === 'VSM'
-    ? 'VSM moments'
-    : shadowDebugMode === 'secondary'
-      ? 'Secondary depth'
-      : 'Primary depth';
+  const debugLabel = shadowDebugSlotLabel(shadowDebugMode, shadowMethod);
 
   return (
     <div style={{ position: 'relative', flex: 1 }}>

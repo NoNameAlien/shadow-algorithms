@@ -25,3 +25,28 @@ export function orthoZO(out: mat4, left: number, right: number, bottom: number, 
   out[14] = near * nf;
   out[15] = 1;
 }
+
+export function perspectiveZO(out: mat4, fovy: number, aspect: number, near: number, far: number) {
+  const f = 1 / Math.tan(fovy / 2);
+  const nf = 1 / (near - far);
+
+  out[0] = f / aspect;
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0;
+
+  out[4] = 0;
+  out[5] = f;
+  out[6] = 0;
+  out[7] = 0;
+
+  out[8] = 0;
+  out[9] = 0;
+  out[10] = far * nf;
+  out[11] = -1;
+
+  out[12] = 0;
+  out[13] = 0;
+  out[14] = far * near * nf;
+  out[15] = 0;
+}

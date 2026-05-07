@@ -5,7 +5,13 @@ export type ModelData = {
   positions: Float32Array;
   normals: Float32Array;
   indices: Uint16Array | Uint32Array;
+  indexFormat: GPUIndexFormat;
 };
+
+const createIndexArray = (indices: number[]) =>
+  indices.length < 65536
+    ? { indices: new Uint16Array(indices), indexFormat: 'uint16' as const }
+    : { indices: new Uint32Array(indices), indexFormat: 'uint32' as const };
 
 type GLTFAccessorType = 'SCALAR' | 'VEC2' | 'VEC3';
 
@@ -101,12 +107,12 @@ export class ModelLoader {
       `✓ Parsed GLTF: ${positions.length / 3} vertices, ${indicesArray.length / 3} triangles`
     );
 
+    const indexData = createIndexArray(indicesArray);
+
     return {
       positions,
       normals,
-      indices: indicesArray.length < 65536
-        ? new Uint16Array(indicesArray)
-        : new Uint32Array(indicesArray)
+      ...indexData
     };
   }
 
@@ -312,10 +318,12 @@ export class ModelLoader {
 
     console.log(`✓ Parsed OBJ: ${finalPositions.length / 3} vertices, ${indices.length / 3} triangles`);
 
+    const indexData = createIndexArray(indices);
+
     return {
       positions: new Float32Array(finalPositions),
       normals: new Float32Array(finalNormals),
-      indices: indices.length < 65536 ? new Uint16Array(indices) : new Uint32Array(indices)
+      ...indexData
     };
   }
 

@@ -4,19 +4,20 @@ import type { ShadowParams } from '../components/ControlPanel';
 import type { LightScreenPosition } from '../components/SceneViewport';
 import { hexToRgb01, rgb01ToHex } from '../utils/color';
 import { downloadJsonFile, readJsonFile } from '../utils/sceneFile';
+import { validateSceneDTO } from '../utils/sceneValidation';
 import { SCENE_PRESETS, type ScenePresetId } from '../engine/presets';
-import type { ScenePresetSelection } from '../components/control-panel/types';
+import type { ObjectScale, ScenePresetSelection } from '../components/control-panel/types';
 
 type Lang = 'en' | 'ru';
 type MeshOption = { id: number; name: string };
 type EntityMeta = { count: number; activeIndex: number; names: string[] };
-type SceneSnapshot = ReturnType<Renderer['exportScene']>;
 
 type ObjectPanelState = {
   color: string;
   castShadows: boolean;
   receiveShadows: boolean;
   selfShadows: boolean;
+  scale: ObjectScale;
   meshId: number;
   specular: number;
   shininess: number;
@@ -48,6 +49,7 @@ const DEFAULT_OBJECT_STATE: ObjectPanelState = {
   castShadows: true,
   receiveShadows: false,
   selfShadows: false,
+  scale: [1, 1, 1],
   meshId: 0,
   specular: 0.5,
   shininess: 32,
@@ -84,6 +86,9 @@ const sameObjectState = (left: ObjectPanelState, right: ObjectPanelState) =>
   left.castShadows === right.castShadows &&
   left.receiveShadows === right.receiveShadows &&
   left.selfShadows === right.selfShadows &&
+  left.scale[0] === right.scale[0] &&
+  left.scale[1] === right.scale[1] &&
+  left.scale[2] === right.scale[2] &&
   left.meshId === right.meshId &&
   left.specular === right.specular &&
   left.shininess === right.shininess &&
@@ -136,6 +141,7 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       castShadows: objectInfo.castShadows,
       receiveShadows: objectInfo.receiveShadows,
       selfShadows: objectInfo.selfShadows,
+      scale: objectInfo.scale,
       meshId: objectInfo.meshId,
       specular: objectInfo.specular,
       shininess: objectInfo.shininess,
@@ -215,9 +221,10 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   };
 
   const handleLoadSceneFile = (file: File) => {
-    readJsonFile<SceneSnapshot>(
+    readJsonFile<unknown>(
       file,
-      (scene) => {
+      (data) => {
+        const scene = validateSceneDTO(data);
         setActiveScenePreset('custom');
         setShowFloor(scene.showFloor);
         setShowWalls(scene.showWalls);
@@ -229,7 +236,7 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       },
       (error) => {
         console.error('Failed to load scene:', error);
-        alert('Ошибка загрузки сцены: некорректный JSON');
+        alert(`Ошибка загрузки сцены: ${error instanceof Error ? error.message : 'некорректный JSON'}`);
       }
     );
   };
@@ -388,6 +395,12 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
     runRendererCommand((renderer) => renderer.setActiveObjectSelfShadows(value));
   };
 
+  const handleObjectScaleChange = (scale: ObjectScale) => {
+    setObjectState((previous) => ({ ...previous, scale }));
+    setActiveScenePreset('custom');
+    runRendererCommand((renderer) => renderer.setActiveObjectScale(scale));
+  };
+
   const handleObjectMeshChange = (meshId: number) => {
     setObjectState((previous) => ({ ...previous, meshId }));
     runRendererCommand((renderer) => renderer.setActiveObjectMesh(meshId));
@@ -474,6 +487,8 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       onLoadSceneFile: handleLoadSceneFile,
       objectColor: objectState.color,
       onObjectColorChange: handleObjectColorChange,
+      objectScale: objectState.scale,
+      onObjectScaleChange: handleObjectScaleChange,
       objectCastShadows: objectState.castShadows,
       onObjectCastShadowsChange: handleObjectCastShadowsChange,
       objectReceiveShadows: objectState.receiveShadows,
