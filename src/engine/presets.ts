@@ -330,69 +330,80 @@ export const SCENE_PRESETS: Record<ScenePresetId, ScenePreset> = {
     id: 'penumbraTest',
     label: { en: 'Penumbra Test', ru: 'Полутени' },
     showFloor: true,
-    showWalls: true,
-    floorSize: 12,
+    showWalls: false,
+    floorSize: 14,
     showGrid: false,
-    floorColor: [0.16, 0.17, 0.18],
+    floorColor: [0.18, 0.18, 0.16],
     wallColor: [0.1, 0.105, 0.11],
     shadowMethod: 'PCSS',
     shadowParams: {
       shadowMapSize: 2048,
-      bias: 0.003,
-      pcssLightSize: 0.16,
+      bias: 0.0025,
+      pcssLightSize: 0.14,
       pcssBlockerSearchSamples: 32,
-      shadowStrength: 1.1,
-      ambientStrength: 0.34
+      shadowStrength: 1.18,
+      ambientStrength: 0.24,
+      exposure: 0.95
     },
     objects: [
       {
-        name: 'Near blocker',
-        pos: [-1.6, cubeOnFloorY(0.7), -0.8],
-        scale: [0.55, 0.55, 0.55],
-        meshId: 2,
-        color: [0.86, 0.66, 0.5],
-        receiveShadows: true,
-        selfShadows: true,
-        roughness: 0.44,
-        specular: 0.45
-      },
-      {
-        name: 'Raised blocker',
-        pos: [1.4, floorY + 1.8, -0.2],
-        scale: [0.65, 0.65, 0.65],
-        meshId: 1,
-        color: [0.62, 0.78, 1.0],
-        receiveShadows: true,
-        selfShadows: true,
-        roughness: 0.34,
-        specular: 0.58
-      },
-      {
-        name: 'Back receiver',
-        pos: [1.5, cubeOnFloorY(0.08), 2.2],
-        scale: [3.6, 0.08, 1.3],
+        name: 'Gnomon stem',
+        pos: [-0.18, floorY + 1.02, -0.2],
+        scale: [0.13, 0.98, 0.13],
         meshId: 0,
-        color: [0.52, 0.56, 0.6],
+        color: [0.9, 0.74, 0.48],
+        receiveShadows: true,
+        selfShadows: true,
+        roughness: 0.46,
+        specular: 0.28
+      },
+      {
+        name: 'Gnomon foot',
+        pos: [-0.18, floorY + 0.19, -0.2],
+        scale: [0.42, 0.08, 0.42],
+        meshId: 2,
+        color: [0.74, 0.62, 0.42],
+        receiveShadows: true,
+        selfShadows: true,
+        roughness: 0.5,
+        specular: 0.18
+      },
+      {
+        name: 'Gnomon tip',
+        pos: [-0.18, floorY + 2.02, -0.2],
+        scale: [0.23, 0.23, 0.23],
+        meshId: 2,
+        color: [0.92, 0.78, 0.54],
+        receiveShadows: true,
+        selfShadows: true,
+        roughness: 0.38,
+        specular: 0.34
+      },
+      ...Array.from({ length: 13 }, (_, index) => {
+        const angle = (-150 + index * 25) * Math.PI / 180;
+        const radius = 2.35;
+        return {
+        name: `Hour mark ${index + 1}`,
+        pos: [Math.sin(angle) * radius, floorY + 0.23, Math.cos(angle) * radius] as [number, number, number],
+        scale: [0.13, 0.08, 0.13] as [number, number, number],
+        meshId: 2,
+        color: [0.38, 0.35, 0.28] as [number, number, number],
         receiveShadows: true,
         castShadows: false,
-        roughness: 0.86,
-        specular: 0.1
-      }
+        roughness: 0.8,
+        specular: 0.08
+        };
+      })
     ],
     lights: [
       {
-        name: 'Large spot',
-        pos: [-4.8, 6.6, 4.2],
-        type: 'spot',
-        yaw: 2.34,
-        pitch: -0.84,
-        intensity: 1.45,
-        color: [1.0, 0.86, 0.72],
+        name: 'Low angled sun',
+        pos: [-4.6, 3.2, -2.2],
+        type: 'sun',
+        intensity: 1.65,
+        color: [1.0, 0.86, 0.62],
         castShadows: true,
-        innerConeDeg: 18,
-        outerConeDeg: 48,
-        range: 24,
-        falloff: 1.05
+        range: 24
       }
     ]
   },
@@ -449,13 +460,13 @@ export const SCENE_PRESETS: Record<ScenePresetId, ScenePreset> = {
     ],
     lights: [
       {
-        name: 'Warm spot',
+        name: 'Red spot',
         pos: [-4.8, 6.0, 3.4],
         type: 'spot',
         yaw: 2.2,
         pitch: -0.82,
-        intensity: 1.05,
-        color: [1.0, 0.72, 0.52],
+        intensity: 3.0,
+        color: [1.0, 0.18, 0.12],
         castShadows: true,
         innerConeDeg: 18,
         outerConeDeg: 50,
@@ -463,13 +474,13 @@ export const SCENE_PRESETS: Record<ScenePresetId, ScenePreset> = {
         falloff: 1.05
       },
       {
-        name: 'Cool spot',
+        name: 'Blue spot',
         pos: [4.8, 6.0, 3.4],
         type: 'spot',
         yaw: -2.2,
         pitch: -0.82,
-        intensity: 0.95,
-        color: [0.55, 0.72, 1.0],
+        intensity: 3.0,
+        color: [0.12, 0.38, 1.0],
         castShadows: true,
         innerConeDeg: 18,
         outerConeDeg: 50,
@@ -483,49 +494,134 @@ export const SCENE_PRESETS: Record<ScenePresetId, ScenePreset> = {
     label: { en: 'VSM Bleeding Test', ru: 'VSM протекание' },
     showFloor: true,
     showWalls: false,
-    floorSize: 12,
+    floorSize: 16,
     showGrid: false,
-    floorColor: [0.12, 0.14, 0.13],
-    wallColor: [0.08, 0.1, 0.09],
+    floorColor: [0.26, 0.24, 0.18],
+    wallColor: [0.12, 0.11, 0.08],
     shadowMethod: 'VSM',
     shadowParams: {
       shadowMapSize: 2048,
-      vsmMinVariance: 0.00008,
-      vsmLightBleedReduction: 0.22,
-      shadowStrength: 1.15,
-      ambientStrength: 0.3
+      vsmMinVariance: 0.00012,
+      vsmLightBleedReduction: 0.18,
+      shadowStrength: 1.28,
+      ambientStrength: 0.12,
+      exposure: 0.82,
+      hemisphereSkyColor: [0.7, 0.62, 0.46],
+      hemisphereGroundColor: [0.08, 0.07, 0.05]
     },
     objects: [
       {
-        name: 'Back wall slab',
-        pos: [0.6, cubeOnFloorY(1.25), -1.15],
-        scale: [3.6, 1.25, 0.08],
+        name: 'Spotlight wall',
+        pos: [0, 1.95, -2.15],
+        scale: [7.4, 4.45, 0.08],
         meshId: 0,
-        color: [0.36, 0.48, 0.42],
+        color: [0.25, 0.23, 0.17],
         receiveShadows: true,
         castShadows: false,
-        roughness: 0.84
+        specular: 0.08,
+        roughness: 0.86
       },
-      ...Array.from({ length: 9 }, (_, index) => ({
-        name: `Thin occluder ${index + 1}`,
-        pos: [-2.4 + index * 0.6, cubeOnFloorY(0.95), -0.1 + (index % 3) * 0.12] as [number, number, number],
-        scale: [0.08, 0.95, 0.08] as [number, number, number],
-        meshId: 0,
-        color: [0.68, 0.46, 0.28] as [number, number, number],
+      {
+        name: 'Narrow beam sphere',
+        pos: [-5.1, floorY + 0.82, -1.25],
+        scale: [0.62, 0.62, 0.62],
+        meshId: 2,
+        color: [0.82, 0.76, 0.63],
         receiveShadows: true,
         selfShadows: true,
-        roughness: 0.7,
-        specular: 0.14
-      }))
+        specular: 0.32,
+        roughness: 0.64
+      },
+      {
+        name: 'Medium beam sphere',
+        pos: [-1.7, floorY + 0.82, -1.25],
+        scale: [0.62, 0.62, 0.62],
+        meshId: 2,
+        color: [0.74, 0.69, 0.57],
+        receiveShadows: true,
+        selfShadows: true,
+        specular: 0.28,
+        roughness: 0.68
+      },
+      {
+        name: 'Angled leak sphere',
+        pos: [1.7, floorY + 0.82, -1.25],
+        scale: [0.62, 0.62, 0.62],
+        meshId: 2,
+        color: [0.55, 0.52, 0.44],
+        receiveShadows: true,
+        selfShadows: true,
+        specular: 0.18,
+        roughness: 0.76
+      },
+      {
+        name: 'Wide beam sphere',
+        pos: [5.1, floorY + 0.82, -1.25],
+        scale: [0.62, 0.62, 0.62],
+        meshId: 2,
+        color: [0.7, 0.66, 0.55],
+        receiveShadows: true,
+        selfShadows: true,
+        specular: 0.24,
+        roughness: 0.7
+      }
     ],
     lights: [
       {
-        name: 'Soft sun',
-        pos: [5.2, 7.8, 4.4],
-        type: 'sun',
-        intensity: 1.15,
-        color: [1.0, 0.84, 0.64],
-        castShadows: true
+        name: 'Narrow spotlight',
+        pos: [-5.1, 5.8, 0.05],
+        type: 'spot',
+        yaw: 3.142,
+        pitch: -1.403,
+        intensity: 3.4,
+        color: [1.0, 0.9, 0.68],
+        castShadows: true,
+        innerConeDeg: 4,
+        outerConeDeg: 13,
+        range: 9,
+        falloff: 2.2
+      },
+      {
+        name: 'Soft oval spotlight',
+        pos: [-1.7, 5.85, 0.05],
+        type: 'spot',
+        yaw: 3.142,
+        pitch: -1.404,
+        intensity: 2.65,
+        color: [1.0, 0.88, 0.64],
+        castShadows: true,
+        innerConeDeg: 8,
+        outerConeDeg: 24,
+        range: 10,
+        falloff: 1.75
+      },
+      {
+        name: 'Angled spill spotlight',
+        pos: [1.7, 5.95, 0.1],
+        type: 'spot',
+        yaw: 3.142,
+        pitch: -1.400,
+        intensity: 2.35,
+        color: [1.0, 0.86, 0.58],
+        castShadows: true,
+        innerConeDeg: 10,
+        outerConeDeg: 32,
+        range: 12,
+        falloff: 1.35
+      },
+      {
+        name: 'Wide spotlight',
+        pos: [5.1, 6.15, 0.2],
+        type: 'spot',
+        yaw: 3.142,
+        pitch: -1.392,
+        intensity: 2.85,
+        color: [1.0, 0.9, 0.68],
+        castShadows: true,
+        innerConeDeg: 18,
+        outerConeDeg: 48,
+        range: 15,
+        falloff: 1.05
       }
     ]
   }

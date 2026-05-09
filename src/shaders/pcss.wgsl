@@ -15,19 +15,40 @@ fn compareShadow(lightIndex: i32, uv: vec2<f32>, depth: f32) -> f32 {
   return textureSampleCompare(shadowMap, shadowSampler, uv, lightIndex, depth);
 }
 
-fn findBlockerDistance(uv: vec2<f32>, zReceiver: f32, searchRadius: f32, lightIndex: i32) -> vec2<f32> {
+fn linearizePerspectiveDepth(depth: f32, near: f32, far: f32) -> f32 {
+  let distance = (near * far) / max(far - depth * (far - near), 0.000001);
+  return clamp((distance - near) / max(far - near, 0.000001), 0.0, 1.0);
+}
+
+fn pcssDepthForLight(light: Light, rawDepth: f32) -> f32 {
+  let mode = i32(round(light.lightType));
+  if (mode != LIGHT_MODE_SPOT) {
+    return rawDepth;
+  }
+
+  let near = 0.05;
+  let far = max(8.0, max(4.0, light.range) * 1.45);
+  return linearizePerspectiveDepth(rawDepth, near, far);
+}
+
+fn findBlockerDistance(
+  uv: vec2<f32>,
+  zReceiver: f32,
+  searchRadius: f32,
+  light: Light,
+  lightIndex: i32
+) -> vec2<f32> {
   let texelSize = shadowTexelSize(u.shadowParams);
   let sampleCount = i32(shadowParamZ(u.shadowParams));
   
   var blockerSum: f32 = 0.0;
   var numBlockers: f32 = 0.0;
   
-  // ФИКСИРОВАННЫЙ цикл — максимум 8 сэмплов для blocker search
-  let maxSamples = min(sampleCount, 8);
-  for (var i = 0; i < 8; i = i + 1) {
+  let maxSamples = min(sampleCount, 32);
+  for (var i = 0; i < 32; i = i + 1) {
     if (i < maxSamples) {
       let offset = POISSON_64[i] * searchRadius * texelSize;
-      let shadowMapDepth = loadShadowDepth(lightIndex, uv + offset);
+      let shadowMapDepth = pcssDepthForLight(light, loadShadowDepth(lightIndex, uv + offset));
       
       if (shadowMapDepth < zReceiver) {
         blockerSum += shadowMapDepth;
@@ -44,9 +65,9 @@ fn findBlockerDistance(uv: vec2<f32>, zReceiver: f32, searchRadius: f32, lightIn
   return vec2<f32>(avgBlockerDepth, numBlockers);
 }
 
-fn pcfFilter(uv: vec2<f32>, zReceiver: f32, filterRadius: f32, lightIndex: i32, bias: f32) -> f32 {
+fn pcfFilter(uv: vec2<f32>, rawReceiverDepth: f32, filterRadius: f32, lightIndex: i32, bias: f32) -> f32 {
   let texelSize = shadowTexelSize(u.shadowParams);
-  let depth = zReceiver - bias;
+  let depth = rawReceiverDepth - bias;
   
   var shadow: f32 = 0.0;
   
@@ -61,26 +82,27 @@ fn pcfFilter(uv: vec2<f32>, zReceiver: f32, filterRadius: f32, lightIndex: i32, 
 
 fn penumbraSize(zReceiver: f32, zBlocker: f32) -> f32 {
   let lightSize = shadowParamY(u.shadowParams);
-  return max((zReceiver - zBlocker) * lightSize / zBlocker, 0.0);
+  return max((zReceiver - zBlocker) * lightSize / max(zBlocker, 0.001), 0.0);
 }
 
-fn samplePCSS(lightSpacePos: vec4<f32>, lightIndex: i32, bias: f32) -> f32 {
+fn samplePCSS(lightSpacePos: vec4<f32>, light: Light, lightIndex: i32, bias: f32) -> f32 {
   let sample = makeUnbiasedShadowSample(lightSpacePos);
-  let zReceiver = sample.depth;
+  let rawReceiverDepth = sample.depth;
+  let zReceiver = pcssDepthForLight(light, rawReceiverDepth);
   
   // ВСЕГДА выполняем поиск блокеров (uniform control flow)
-  let searchWidth = shadowParamY(u.shadowParams) * 2.0;
-  let blockerInfo = findBlockerDistance(sample.uv, zReceiver, searchWidth, lightIndex);
+  let searchWidth = clamp(shadowParamY(u.shadowParams) * mix(45.0, 130.0, zReceiver), 3.0, 32.0);
+  let blockerInfo = findBlockerDistance(sample.uv, zReceiver, searchWidth, light, lightIndex);
   
   // Проверяем наличие блокеров
   let hasBlockers = blockerInfo.x >= 0.0;
   
   // Если есть блокеры, вычисляем радиус полутени, иначе 0
   let penumbra = select(0.0, penumbraSize(zReceiver, blockerInfo.x), hasBlockers);
-  let filterRadius = max(penumbra * 50.0, 1.0);
+  let filterRadius = clamp(1.0 + penumbra * 150.0, 1.0, 28.0);
   
   // ВСЕГДА выполняем PCF (uniform control flow)
-  let pcfResult = pcfFilter(sample.uv, zReceiver, filterRadius, lightIndex, bias);
+  let pcfResult = pcfFilter(sample.uv, rawReceiverDepth, filterRadius, lightIndex, bias);
   
   // Если нет блокеров → 1.0 (полностью освещено)
   // Если есть блокеры → результат PCF
@@ -107,7 +129,7 @@ fn computeLightContribution(
     let bias = shadowBiasForLight(light, u.shadowParams);
     let biasedWorldPos = worldPos + N * receiverNormalBiasForLight(light, N, L, u.shadowParams);
     let lightSpacePos = lsMat * vec4<f32>(biasedWorldPos, 1.0);
-    let rawVisibility = samplePCSS(lightSpacePos, lightIndex, bias);
+    let rawVisibility = samplePCSS(lightSpacePos, light, lightIndex, bias);
     vis = mixShadowStrength(rawVisibility, shading.shadowStrength);
   }
 

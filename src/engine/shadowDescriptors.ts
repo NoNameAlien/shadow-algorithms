@@ -1,5 +1,5 @@
 import type { vec3 } from "gl-matrix";
-import type { LightDef, ShadowMethod } from "./types";
+import type { LightDef } from "./types";
 
 export type ShadowProjectionDescriptor =
   | {
@@ -18,26 +18,12 @@ export type ShadowProjectionDescriptor =
       shadowOrthoSize: number | null;
     };
 
-export function getShadowProjectionDescriptor(
-  light: LightDef | undefined,
-  method: ShadowMethod,
-): ShadowProjectionDescriptor {
+export function getShadowProjectionDescriptor(light: LightDef | undefined): ShadowProjectionDescriptor {
   if (light?.type === "spot") {
     const range = Math.max(4, light.range);
     const outerConeRad = getClampedOuterConeRad(light.outerConeDeg);
     const far = getSpotShadowFar(range);
     const near = 0.05;
-
-    if (method === "VSM") {
-      const size = getVsmSpotOrthoSize(range, outerConeRad);
-      return {
-        type: "orthographic",
-        near,
-        far,
-        size,
-        shadowOrthoSize: size,
-      };
-    }
 
     return {
       type: "perspective",
@@ -103,13 +89,6 @@ export function getStableShadowUp(lightPos: vec3, out: vec3, tempDir: vec3): vec
 
 export function getSpotShadowFar(range: number): number {
   return Math.max(8, range * 1.45);
-}
-
-export function getVsmSpotOrthoSize(range: number, outerConeRad: number): number {
-  // SM/PCF/PCSS use a perspective far plane with range * 1.45. Match that footprint
-  // for the VSM orthographic fallback so spot VSM shadows do not look artificially smaller.
-  const coneRadius = Math.tan(outerConeRad) * getSpotShadowFar(range);
-  return Math.max(4, Math.min(24, coneRadius * 1.15));
 }
 
 export function getClampedOuterConeRad(outerConeDeg: number): number {

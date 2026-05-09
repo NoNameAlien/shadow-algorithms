@@ -12,12 +12,12 @@ export class CameraController {
     private phi = Math.PI / 3; // 60° вертикально
 
     // FPS mode
-    private position = vec3.fromValues(4, 3.5, 5);
+    private position = vec3.fromValues(5.5, 4.4, 7.0);
     private yaw = 0;
     private pitch = 0;
 
     // Стартовые значения (для reset и init)
-    private readonly defaultPosition = vec3.fromValues(4, 3.5, 5);
+    private readonly defaultPosition = vec3.fromValues(5.5, 4.4, 7.0);
     private readonly defaultTarget = vec3.fromValues(0, 0, 0);
 
     private mode: ControlMode = 'orbit';

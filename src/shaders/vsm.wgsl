@@ -27,12 +27,29 @@ fn chebyshevUpperBound(moments: vec2<f32>, t: f32) -> f32 {
   return pMax;
 }
 
-fn shadowVisibilityIndexed(lightSpacePos: vec4<f32>, lightIndex: i32) -> f32 {
+fn linearizePerspectiveDepth(depth: f32, near: f32, far: f32) -> f32 {
+  let distance = (near * far) / max(far - depth * (far - near), 0.000001);
+  return clamp((distance - near) / max(far - near, 0.000001), 0.0, 1.0);
+}
+
+fn vsmDepthForLight(light: Light, rawDepth: f32) -> f32 {
+  let mode = i32(round(light.lightType));
+  if (mode != LIGHT_MODE_SPOT) {
+    return rawDepth;
+  }
+
+  let near = 0.05;
+  let far = max(8.0, max(4.0, light.range) * 1.45);
+  return linearizePerspectiveDepth(rawDepth, near, far);
+}
+
+fn shadowVisibilityIndexed(lightSpacePos: vec4<f32>, light: Light, lightIndex: i32) -> f32 {
   let sample = makeUnbiasedShadowSample(lightSpacePos);
+  let receiverDepth = vsmDepthForLight(light, sample.depth);
   
   // ВСЕГДА читаем моменты (uniform control flow)
   let moments = textureSample(momentsTex, momentsSampler, sample.uv, lightIndex).rg;
-  let visibility = chebyshevUpperBound(moments, sample.depth);
+  let visibility = chebyshevUpperBound(moments, receiverDepth);
   
   // Возвращаем 1.0 если вне границ, иначе результат VSM
   return select(visibility, 1.0, !sample.inBounds);
@@ -54,7 +71,7 @@ fn computeLightContribution(
     let lsMat = shadowMats.mats[lightIndex];
     let biasedWorldPos = worldPos + N * receiverNormalBias(N, L, u.shadowParams);
     let lightSpacePos = lsMat * vec4<f32>(biasedWorldPos, 1.0);
-    let rawVisibility = shadowVisibilityIndexed(lightSpacePos, lightIndex);
+    let rawVisibility = shadowVisibilityIndexed(lightSpacePos, light, lightIndex);
     vis = mixShadowStrength(rawVisibility, shading.shadowStrength);
   }
 

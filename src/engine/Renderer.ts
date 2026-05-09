@@ -63,6 +63,8 @@ import type {
 
 export type { LightMode, PerformanceMetrics, ShadowDebugMode, ShadowMethod } from "./types";
 
+export type DeviceLostHandler = (message: string) => void;
+
 export class Renderer {
   private canvas: HTMLCanvasElement;
   private gpu!: GPUCtx;
@@ -169,6 +171,8 @@ export class Renderer {
   private lightViewProj = mat4.create();
 
   private rafId = 0;
+  private deviceLost = false;
+  private deviceLostHandler: DeviceLostHandler | null = null;
 
   private frameCount = 0;
   private lastFpsUpdate = performance.now();
@@ -232,6 +236,7 @@ export class Renderer {
   private tempLightUniform = new Float32Array(4);
   private tempCameraUniform = new Float32Array(4);
   private tempShadowParamsUniform = new Float32Array(4);
+  private tempShadowSlotParamsUniforms = Array.from({ length: MAX_SHADOW_SLOTS }, () => new Float32Array(4));
   private tempLightBeamVertices = new Float32Array(6);
   private tempZeroBeamVertices = new Float32Array(6);
   private lastShadingData = new Float32Array(SHADING_FLOATS);
@@ -633,6 +638,7 @@ export class Renderer {
     if (l) {
       l.innerConeDeg = Math.min(value, l.outerConeDeg - 1);
       this.markLightDataDirty();
+      this.updateLightViewProj();
     }
   }
 
@@ -641,6 +647,7 @@ export class Renderer {
     if (l) {
       l.outerConeDeg = Math.max(value, l.innerConeDeg + 1);
       this.markLightDataDirty();
+      this.updateLightViewProj();
     }
   }
 
@@ -649,6 +656,7 @@ export class Renderer {
     if (l) {
       l.range = value;
       this.markLightDataDirty();
+      this.updateLightViewProj();
     }
   }
 
@@ -662,6 +670,10 @@ export class Renderer {
 
   setObjectAutoRotate(enabled: boolean) {
     this.objectAutoRotate = enabled;
+  }
+
+  setDeviceLostHandler(handler: DeviceLostHandler | null) {
+    this.deviceLostHandler = handler;
   }
 
   getObjectAutoRotate() {
@@ -769,6 +781,31 @@ export class Renderer {
     ) {
       this.shadowMatsBufferDirty = false;
     }
+  }
+
+  private writeVsmShadowSlotParams(slots: ShadowSlot[], baseParams: Float32Array): Float32Array[] {
+    for (const params of this.tempShadowSlotParamsUniforms) {
+      params.set(baseParams);
+      params[2] = 0;
+      params[3] = 0;
+    }
+
+    for (const slot of slots) {
+      const light = this.lights[slot.lightIndex];
+      const params = this.tempShadowSlotParamsUniforms[slot.slotIndex];
+      params.set(baseParams);
+
+      if (light?.type === "spot") {
+        const projection = getShadowProjectionDescriptor(light);
+        params[2] = projection.near;
+        params[3] = projection.far;
+      } else {
+        params[2] = 0;
+        params[3] = 0;
+      }
+    }
+
+    return this.tempShadowSlotParamsUniforms;
   }
 
   private drawShadowCasters(pass: GPURenderPassEncoder, slotIndex: number): void {
@@ -964,7 +1001,9 @@ export class Renderer {
 
     const closestOnRay = vec3.scaleAndAdd(vec3.create(), rayOrigin, rayDir, rayT);
     const distance = vec3.distance(closestOnRay, closestOnSegment);
-    const pickRadius = Math.max(0.22, Math.min(0.55, beamLength * 0.035));
+    const coneDistance = beamLength * segmentT;
+    const coneRadius = Math.tan((Math.max(1, Math.min(78, light.outerConeDeg)) * Math.PI) / 180) * coneDistance;
+    const pickRadius = Math.max(0.45, Math.min(2.4, coneRadius + beamLength * 0.04));
     return distance <= pickRadius ? rayT : Number.POSITIVE_INFINITY;
   }
 
@@ -1121,6 +1160,7 @@ export class Renderer {
 
   async init() {
     this.gpu = await initWebGPU(this.canvas);
+    this.watchDeviceLost(this.gpu.device);
     this.cameraController = new CameraController(this.canvas);
 
     this.createDepth();
@@ -1839,7 +1879,7 @@ export class Renderer {
     const up = getStableShadowUp(pos, this.tempLightUp, this.tempLightDirNorm);
     const target = getShadowTargetForLight(main, this.tempLightBeamEnd, this.tempLightBeamDir);
     mat4.lookAt(this.tempLightView, pos, target, up);
-    this.writeLightProjection(main, this.tempLightProj, this.shadowParams.method);
+    this.writeLightProjection(main, this.tempLightProj);
 
     mat4.multiply(this.lightViewProj, this.tempLightProj, this.tempLightView);
 
@@ -1856,14 +1896,14 @@ export class Renderer {
     const up = getStableShadowUp(l.pos, this.tempLightUp, this.tempLightDirNorm);
     const target = getShadowTargetForLight(l, this.tempLightBeamEnd, this.tempLightBeamDir);
     mat4.lookAt(this.tempLightView, l.pos, target, up);
-    this.writeLightProjection(l, this.tempLightProj, this.shadowParams.method);
+    this.writeLightProjection(l, this.tempLightProj);
 
     mat4.multiply(out, this.tempLightProj, this.tempLightView);
     return out;
   }
 
-  private writeLightProjection(light: LightDef | undefined, out: mat4, method: ShadowMethod) {
-    const descriptor = getShadowProjectionDescriptor(light, method);
+  private writeLightProjection(light: LightDef | undefined, out: mat4) {
+    const descriptor = getShadowProjectionDescriptor(light);
     if (descriptor.type === "perspective") {
       perspectiveZO(out, descriptor.fovY, descriptor.aspect, descriptor.near, descriptor.far);
       return;
@@ -2103,7 +2143,7 @@ export class Renderer {
     const shadowSlot = getShadowSlotLabels(this.lights.length, this.getMaxShadowSlotsForMethod())[this.activeLightIndex] ?? null;
     const method = this.shadowParams.method;
     const isSpot = active?.type === "spot";
-    const projection = active ? getShadowProjectionDescriptor(active, method) : null;
+    const projection = active ? getShadowProjectionDescriptor(active) : null;
     const shadowProjection: "perspective" | "orthographic" | "none" = projection?.type ?? "none";
 
     return {
@@ -2159,6 +2199,7 @@ export class Renderer {
   }
 
   start() {
+    if (this.deviceLost) return;
     const now = performance.now();
     this.lastFrameTime = now;
     this.lastFpsUpdate = now;
@@ -2172,6 +2213,19 @@ export class Renderer {
 
   stop() {
     cancelAnimationFrame(this.rafId);
+  }
+
+  private watchDeviceLost(device: GPUDevice) {
+    device.lost.then((info) => {
+      this.deviceLost = true;
+      this.stop();
+
+      const reason = info.reason ? ` (${info.reason})` : "";
+      const details = info.message ? `: ${info.message}` : "";
+      const message = `WebGPU device lost${reason}${details}`;
+      console.warn(message);
+      this.deviceLostHandler?.(message);
+    });
   }
 
   destroy() {
@@ -2199,6 +2253,7 @@ export class Renderer {
   }
 
   private frame() {
+    if (this.deviceLost) return;
     const { device, context } = this.gpu;
 
     this.frameCount++;
@@ -2464,6 +2519,9 @@ export class Renderer {
       camPos,
       lightSelected: this.lightSelected,
       shadowParamsUniform,
+      shadowSlotParamsUniforms: this.shadowParams.method === "VSM"
+        ? this.writeVsmShadowSlotParams(shadowSlots, shadowParamsUniform)
+        : undefined,
       rotation,
       maxShadowSlots: MAX_SHADOW_SLOTS,
     });
@@ -2730,6 +2788,11 @@ export class Renderer {
     if (methodChanged || sizeChanged) {
       this.recreateBindGroups();
       console.log(`Switched to ${params.method}, bind groups recreated`);
+    }
+
+    if (methodChanged) {
+      this.shadowMatsBufferDirty = true;
+      this.updateLightViewProj();
     }
   }
 

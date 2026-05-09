@@ -9,6 +9,7 @@ export type ObjectUniformWriteContext = {
   camPos: ArrayLike<number>;
   lightSelected: boolean;
   shadowParamsUniform: Float32Array;
+  shadowSlotParamsUniforms?: Float32Array[];
   rotation: mat4;
   maxShadowSlots: number;
 };
@@ -50,7 +51,7 @@ export class ObjectUniformWriter {
           context.lightPos,
           context.camPos,
           context.lightSelected,
-          context.shadowParamsUniform,
+          context.shadowSlotParamsUniforms?.[slotIndex] ?? context.shadowParamsUniform,
         );
         device.queue.writeBuffer(state.shadowUniformBufs[slotIndex], 0, this.uniformData);
       }

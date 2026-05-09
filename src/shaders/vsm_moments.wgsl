@@ -25,9 +25,17 @@ fn vs_main(input: VSIn) -> VSOut {
   return out;
 }
 
+fn linearizePerspectiveDepth(depth: f32, near: f32, far: f32) -> f32 {
+  let distance = (near * far) / max(far - depth * (far - near), 0.000001);
+  return clamp((distance - near) / max(far - near, 0.000001), 0.0, 1.0);
+}
+
 @fragment
 fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
-  let depth = clamp(fragCoord.z, 0.0, 1.0);
+  let rawDepth = clamp(fragCoord.z, 0.0, 1.0);
+  let near = u.shadowParams.z;
+  let far = u.shadowParams.w;
+  let depth = select(rawDepth, linearizePerspectiveDepth(rawDepth, near, far), far > near && near > 0.0);
   let dx = dpdx(depth);
   let dy = dpdy(depth);
   let moment1 = depth;

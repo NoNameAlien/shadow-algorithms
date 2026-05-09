@@ -74,9 +74,6 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
         <div style={{ marginBottom: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, marginBottom: 5 }}>
             <span style={{ opacity: 0.85 }}>{strings.qualityPreset}</span>
-            <span style={{ color: activeQuality ? '#9ec5ff' : '#c7ccd6', fontWeight: 700 }}>
-              {isRu ? 'Активно' : 'Active'}: {activeQuality?.label[isRu ? 'ru' : 'en'] ?? (isRu ? 'Польз.' : 'Custom')}
-            </span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 5 }}>
             {SHADOW_QUALITY_PRESETS.map((preset) => {

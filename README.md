@@ -42,7 +42,9 @@ npm run preview
 Проверки:
 
 ```bash
+npm test
 npm run lint
+npm run build
 ```
 
 ## Что реализовано
@@ -60,6 +62,7 @@ npm run lint
 - Отладка активного источника: cone mask, distance falloff и active shadow visibility.
 - Визуализация карты теней / моментов VSM по shadow slots `0..7`.
 - Диагностика активного источника света: slot, projection, shadow far, effective bias, cone/range/falloff.
+- Обработка `device.lost` с остановкой render loop и выводом ошибки WebGPU.
 - Runtime validation импортируемой сцены.
 - Масштаб объекта по осям и uniform scale.
 - Метрики FPS и времени кадра.
@@ -94,54 +97,73 @@ FPS-режим:
 
 ```text
 src/
-├── App.tsx
+├── App.tsx # верхний React-компонент, benchmark runner и экспорт отчетов
+├── main.tsx # точка входа React-приложения
 ├── components/
-│   ├── SceneViewport.tsx
-│   └── control-panel/
-│       ├── ControlPanel.tsx
-│       ├── ShadowSettingsSection.tsx
-│       ├── LightControls.tsx
-│       ├── ObjectControls.tsx
-│       ├── SceneControls.tsx
+│   ├── SceneViewport.tsx # canvas, FPS panel, debug preview, benchmark overlay
+│   └── control-panel/ # UI управления сценой, объектами, светом, тенями и отчетами
+│       ├── ControlPanel.tsx # сборка секций панели
+│       ├── ShadowSettingsSection.tsx # выбор метода, quality presets, debug modes
+│       ├── LightControls.tsx # настройки источников света
+│       ├── ObjectControls.tsx # выбор и параметры объектов
+│       ├── SceneControls.tsx # сцены, окружение, import/export
 │       └── ...
 ├── engine/
-│   ├── Renderer.ts
-│   ├── ArcballController.ts
-│   ├── CameraController.ts
-│   ├── geometryData.ts
-│   ├── interaction.ts
-│   ├── math.ts
-│   ├── pipelines.ts
-│   ├── presets.ts
-│   ├── resources.ts
-│   ├── scene.ts
-│   ├── shaderSources.ts
-│   ├── textureUtils.ts
-│   └── types.ts
+│   ├── Renderer.ts # главный orchestrator WebGPU-сцены и render loop
+│   ├── ArcballController.ts # вращение demo-объекта
+│   ├── CameraController.ts # orbit/FPS camera и pointer lock
+│   ├── ShadowRenderer.ts # shadow/VSM passes, resources, blur и debug
+│   ├── MeshRegistry.ts # default meshes, OBJ loading и GPU buffers
+│   ├── ObjectDrawStateRegistry.ts # per-object buffers и bind groups
+│   ├── ObjectUniformWriter.ts # packing object uniforms/object params
+│   ├── geometryData.ts # procedural geometry для meshes/gizmos
+│   ├── interaction.ts # picking, ray hits, projection helpers
+│   ├── math.ts # matrix helpers для projection
+│   ├── pipelines.ts # WebGPU render/compute pipelines
+│   ├── presets.ts # scene presets и benchmark scenes
+│   ├── resources.ts # GPU textures, samplers и uniform buffers
+│   ├── scene.ts # создание объектов/источников и DTO import/export
+│   ├── shaderSources.ts # WGSL sources и include resolution
+│   ├── shadowDescriptors.ts # shadow camera projection/target/up/far
+│   ├── shadowSlots.ts # metadata для shadow slots
+│   ├── shadows.ts # shadow slot assignment helpers
+│   ├── textureUtils.ts # создание texture resources
+│   ├── types.ts # общие renderer/scene/shadow/light типы
+│   └── uniformLayouts.ts # TS-side uniform layout constants и packing
 ├── geometry/
-│   └── SphereGenerator.ts
+│   └── SphereGenerator.ts # procedural sphere/icosphere generation
 ├── gpu/
-│   └── initWebGPU.ts
+│   └── initWebGPU.ts # adapter/device/context initialization
+├── hooks/
+│   ├── useRendererLifecycle.ts # создание Renderer, metrics, device lost errors
+│   ├── useSceneController.ts # React-state UI и команды в renderer
+│   └── useRendererControls.ts # вспомогательные renderer controls
 ├── loaders/
-│   └── ModelLoader.ts
+│   └── ModelLoader.ts # OBJ/model loading через loaders.gl
 ├── shaders/
-│   ├── basic.wgsl
-│   ├── pcf.wgsl
-│   ├── pcss.wgsl
-│   ├── vsm.wgsl
-│   ├── vsm_moments.wgsl
-│   ├── vsm_blur.wgsl
-│   ├── grid_solid.wgsl
-│   ├── depth.wgsl
+│   ├── basic.wgsl # базовый Shadow Mapping
+│   ├── pcf.wgsl # Percentage Closer Filtering
+│   ├── pcss.wgsl # blocker search и variable filter radius
+│   ├── vsm.wgsl # main pass для Variance Shadow Maps
+│   ├── vsm_moments.wgsl # moments pass для VSM
+│   ├── vsm_blur.wgsl # compute blur для VSM moments
+│   ├── grid_solid.wgsl # floor/walls с SM/PCF/PCSS/VSM
+│   ├── depth.wgsl # depth-only shadow pass
+│   ├── debug_shadow_depth.wgsl # debug preview depth shadow map
+│   ├── debug_vsm.wgsl # debug preview VSM moments
+│   ├── light_beam.wgsl # визуальный луч прожектора
+│   ├── axis_gizmo.wgsl # editor axis gizmo
 │   └── modules/
-│       ├── lighting_common.wgsl
-│       ├── object_common.wgsl
-│       ├── object_single_shadow_main.wgsl
-│       └── poisson64.wgsl
+│       ├── lighting_common.wgsl # общая light/shadow math
+│       ├── object_common.wgsl # common object uniforms и vertex path
+│       ├── object_single_shadow_main.wgsl # legacy/shared single-shadow path
+│       └── poisson64.wgsl # Poisson sample kernels
 └── utils/
-    ├── color.ts
-    ├── reportExport.ts
-    └── sceneFile.ts
+    ├── color.ts # color conversion helpers
+    ├── reportExport.ts # CSV/PDF/screenshot/ZIP export
+    ├── sceneFile.ts # JSON scene file helpers
+    ├── sceneValidation.ts # runtime validation импортируемой сцены
+    └── shadowQuality.ts # quality presets и method labels
 ```
 
 ## Конвейер рендера
@@ -452,7 +474,7 @@ Main pass:
 
 - может давать лишнюю подсветку внутри тени;
 - требует настройки `minVariance` и `lightBleedReduction`;
-- для прожектора может визуально отличаться от `SM`, `PCF` и `PCSS`: в текущей реализации VSM использует более стабильную orthographic shadow projection для spot, чтобы избежать полосатых contour/ring artifacts.
+- для прожектора требует аккуратной depth-шкалы: в проекте spot/VSM использует perspective shadow projection и linearized depth для moments, чтобы footprint совпадал с поведением прожектора.
 
 ## Источники света
 
@@ -497,54 +519,9 @@ finalLight = ambient + lightA * visibilityA + lightB * visibilityB + ...
 - `Stairs` - ступени разной высоты. Хорошо видно смещение глубины, ступеньки на краях теней и эффект оторванной тени, PCF/PCSS.
 - `Forest` - много тонких стволов и крон. Хорошо проявляет засветы VSM внутри тени, плотные перекрытия и проблемы теней от нескольких источников.
 - `Aliasing Test` - низкое разрешение `SM`, тонкие blocker-объекты и наклонный свет. Нужен, чтобы увидеть жесткие ступенчатые края shadow map.
-- `Penumbra Test` - сцена для `PCSS`: один blocker близко к receiver, другой выше. Нужна для оценки contact hardening и мягкости полутени.
-- `Multi-light Test` - два цветных spot-источника с разными shadow slots. Нужен, чтобы увидеть две независимые тени и их суммирование.
-- `VSM Bleeding Test` - тонкие occluders и receiver для проверки VSM blur, light bleeding и настройки `Light Bleed Reduction`.
-
-## Ограничения текущей версии
-
-1. Shadow pipeline все еще архитектурно живет внутри `Renderer.ts`.
-   Multi-shadow уже работает через slots, но slot selection, matrices, GPU resources и render passes еще не вынесены в отдельный `ShadowRenderer`.
-
-2. VSM spot path осознанно отличается от `SM`/`PCF`/`PCSS`.
-   Для стабильности VSM spot использует orthographic fallback. Это убирает полосатые артефакты, но форма и мягкость тени могут отличаться от perspective spot shadow camera.
-
-3. GLTF loader есть в коде/зависимостях, но пользовательский сценарий сейчас ориентирован на OBJ.
-
-4. `Renderer.ts` большой и требует декомпозиции.
-
-5. Benchmark runner пока учебный, не лабораторно-строгий.
-   Он прогоняет `SM`, `PCF`, `PCSS`, `VSM` по benchmark-сценам, делает плавный orbit camera sweep с отдельными ракурсами для сцен, временно отключает вращение объектов вокруг своей оси, сохраняет screenshots и экспортирует ZIP с JSON/CSV/PDF. Browser/GPU info и repeated runs еще нужно добавить.
-
-6. Spotlight illumination настроен как демонстрационная модель.
-   Дальность и falloff сделаны мягче, чтобы прожектор лучше показывал вклад света и тени на benchmark-сценах. Это не строгая физическая inverse-square модель.
-
-## Оценка качества и benchmark-отчет
-
-Для учебного сравнения нужны не только unit tests, но и отдельный benchmark/report runner. Unit tests должны проверять чистую логику: валидацию сцены, clamp/defaults, назначение shadow slots, расчет DTO и вспомогательные функции. Benchmark runner оценивает поведение алгоритмов в одинаковых условиях.
-
-Рекомендуемый формат benchmark:
-
-- фиксированные сцены: `Multiple Objects`, `Stairs`, `Forest`, `Aliasing Test`, `Penumbra Test`, `Multi-light Test`, `VSM Bleeding Test`;
-- плавный orbit sweep, warmup и длительность замера; runner уже использует scene-specific ракурсы;
-- методы `SM`, `PCF`, `PCSS`, `VSM`;
-- параметры: shadow map size, bias, sample count, filter radius, light size, VSM variance и light bleed reduction;
-- метрики: FPS, frame time, p50/p95/p99; browser/GPU info остается в backlog;
-- артефакты: aliasing, acne, peter-panning, light bleeding, contact hardening, стабильность при нескольких источниках;
-- артефакты отчета: ZIP с CSV/JSON/PDF и screenshot для каждого метода уже есть.
-
-Для демонстрации качества полезны presets `Raw`, `Low`, `Medium`, `High`. Низкое качество должно намеренно показывать жесткие, ступенчатые или квадратные края shadow map: например `SM` с размером `256` или `512` без сглаживания. Это не баг, а учебный режим, который объясняет, зачем нужны PCF, PCSS и VSM.
-
-## План развития
-
-Ближайшие инженерные задачи:
-
-- Вынести shadow caster selection, shadow slot assignment и shadow matrices из `Renderer.ts`.
-- Вынести uniform layout constants для lights, shading params, object params и shadow matrices.
-- Завершить `ShadowRenderer`: resources, passes, slots, matrices, debug overlay.
-- Добавить unit tests для `sceneValidation`, `scene`, `color`, `interaction` и shadow slot logic.
-- Добавить browser/GPU info и более строгий режим repeated runs в benchmark report.
-- Добавить запуск бенчмарков: прогрев, фиксированная длительность, p50/p95/p99 времени кадра.
+- `Penumbra Test` - сцена солнечных часов для `PCSS`: гномон, часовые метки и низкий свет. Нужна, чтобы увидеть contact hardening и мягкость длинной тени на полу.
+- `Multi-light Test` - яркие красный и синий spot-источники с разными shadow slots. Нужен, чтобы увидеть две независимые тени и их суммирование.
+- `VSM Bleeding Test` - несколько прожекторов над сферами у стены. Нужен для проверки VSM blur, light bleeding, spot footprint и настройки `Light Bleed Reduction`.
 
 ## Частые проблемы
 

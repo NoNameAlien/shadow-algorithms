@@ -64,27 +64,107 @@ fn vs_main(input: VSIn) -> VSOut {
   return out;
 }
 
-fn shadowVisibilityFloor(lightSpacePos: vec4<f32>, lightIndex: i32, bias: f32) -> f32 {
+fn loadShadowDepthFloor(lightIndex: i32, uv: vec2<f32>) -> f32 {
+  let size = i32(shadowMapSize(u.shadowParams));
+  let coords = clamp(vec2<i32>(uv * f32(size)), vec2<i32>(0), vec2<i32>(size - 1));
+  return textureLoad(shadowMap, coords, lightIndex, 0);
+}
+
+fn linearizePerspectiveDepthFloor(depth: f32, near: f32, far: f32) -> f32 {
+  let distance = (near * far) / max(far - depth * (far - near), 0.000001);
+  return clamp((distance - near) / max(far - near, 0.000001), 0.0, 1.0);
+}
+
+fn pcssDepthForFloorLight(light: Light, rawDepth: f32) -> f32 {
+  let mode = i32(round(light.lightType));
+  if (mode != LIGHT_MODE_SPOT) {
+    return rawDepth;
+  }
+
+  let near = 0.05;
+  let far = max(8.0, max(4.0, light.range) * 1.45);
+  return linearizePerspectiveDepthFloor(rawDepth, near, far);
+}
+
+fn findFloorBlockerDistance(
+  uv: vec2<f32>,
+  zReceiver: f32,
+  searchRadius: f32,
+  light: Light,
+  lightIndex: i32
+) -> vec2<f32> {
+  let texelSize = shadowTexelSize(u.shadowParams);
+  let sampleCount = min(i32(shadowParamZ(u.shadowParams)), 32);
+  var blockerSum: f32 = 0.0;
+  var numBlockers: f32 = 0.0;
+
+  for (var i = 0; i < 32; i = i + 1) {
+    if (i < sampleCount) {
+      let offset = POISSON_64[i] * searchRadius * texelSize;
+      let shadowMapDepth = pcssDepthForFloorLight(light, loadShadowDepthFloor(lightIndex, uv + offset));
+      if (shadowMapDepth < zReceiver) {
+        blockerSum += shadowMapDepth;
+        numBlockers += 1.0;
+      }
+    }
+  }
+
+  if (numBlockers < 1.0) {
+    return vec2<f32>(-1.0, 0.0);
+  }
+
+  return vec2<f32>(blockerSum / numBlockers, numBlockers);
+}
+
+fn samplePCSSFloor(lightSpacePos: vec4<f32>, light: Light, lightIndex: i32, bias: f32) -> f32 {
+  let sample = makeUnbiasedShadowSample(lightSpacePos);
+  let rawReceiverDepth = sample.depth;
+  let zReceiver = pcssDepthForFloorLight(light, rawReceiverDepth);
+  let searchWidth = clamp(shadowParamY(u.shadowParams) * mix(45.0, 130.0, zReceiver), 3.0, 32.0);
+  let blockerInfo = findFloorBlockerDistance(sample.uv, zReceiver, searchWidth, light, lightIndex);
+  let hasBlockers = blockerInfo.x >= 0.0;
+  let penumbra = select(0.0, max((zReceiver - blockerInfo.x) * shadowParamY(u.shadowParams) / max(blockerInfo.x, 0.001), 0.0), hasBlockers);
+  let filterRadius = clamp(1.0 + penumbra * 150.0, 1.0, 28.0);
+  let texelSize = shadowTexelSize(u.shadowParams);
+  let depth = rawReceiverDepth - bias;
+
+  var shadow: f32 = 0.0;
+  for (var i = 0; i < 16; i = i + 1) {
+    let offset = POISSON_64[i] * filterRadius * texelSize;
+    shadow += textureSampleCompare(shadowMap, shadowSampler, sample.uv + offset, lightIndex, depth);
+  }
+
+  let pcfResult = shadow / 16.0;
+  let shadowResult = select(pcfResult, 1.0, !hasBlockers);
+  return select(shadowResult, 1.0, !sample.inBounds);
+}
+
+fn shadowVisibilityFloor(lightSpacePos: vec4<f32>, light: Light, lightIndex: i32, bias: f32) -> f32 {
   let sample = makeShadowSample(lightSpacePos, bias);
   let method = shadowMethodIndex(shading);
 
   if (method == SHADOW_METHOD_VSM) {
     let unbiasedSample = makeUnbiasedShadowSample(lightSpacePos);
     let moments = textureSample(momentsTex, momentsSampler, unbiasedSample.uv, lightIndex).rg;
+    let receiverDepth = pcssDepthForFloorLight(light, unbiasedSample.depth);
     let mean = moments.x;
     let meanSquare = moments.y;
 
     var visibility: f32 = 1.0;
-    if (unbiasedSample.depth > mean) {
+    if (receiverDepth > mean) {
       let minVariance = shadowBias(u.shadowParams);
       let variance = max(meanSquare - mean * mean, minVariance);
-      let d = unbiasedSample.depth - mean;
+      let d = receiverDepth - mean;
       let pMax = variance / (variance + d * d);
       let bleedReduction = shadowParamY(u.shadowParams);
       visibility = clamp((pMax - bleedReduction) / (1.0 - bleedReduction), 0.0, 1.0);
     }
 
     return select(visibility, 1.0, !unbiasedSample.inBounds);
+  }
+
+  if (method == SHADOW_METHOD_PCSS) {
+    return samplePCSSFloor(lightSpacePos, light, lightIndex, bias);
   }
 
   var radius: f32;
@@ -95,11 +175,6 @@ fn shadowVisibilityFloor(lightSpacePos: vec4<f32>, lightIndex: i32, bias: f32) -
     // PCF: радиус и количество сэмплов из параметров
     radius = shadowParamY(u.shadowParams);     // pcfRadius
     samples = i32(shadowParamZ(u.shadowParams)); // pcfSamples
-    invSize = shadowTexelSize(u.shadowParams);
-  } else if (method == SHADOW_METHOD_PCSS) {
-    // PCSS: используем lightSize как эффективный радиус
-    radius = shadowParamY(u.shadowParams) * 2.0; // pcssLightSize -> width
-    samples = 16;
     invSize = shadowTexelSize(u.shadowParams);
   } else {
     // SM: один sample (жёсткие тени)
@@ -138,7 +213,7 @@ fn computeLightContributionFloor(
     let bias = shadowBiasForLight(light, u.shadowParams);
     let biasedWorldPos = worldPos + N * receiverNormalBiasForLight(light, N, L, u.shadowParams);
     let biasedLightSpacePos = lsMat * vec4<f32>(biasedWorldPos, 1.0);
-    let rawVisibility = shadowVisibilityFloor(biasedLightSpacePos, lightIndex, bias);
+    let rawVisibility = shadowVisibilityFloor(biasedLightSpacePos, light, lightIndex, bias);
     vis = mixShadowStrength(rawVisibility, shading.shadowStrength);
   }
 

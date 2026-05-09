@@ -28,6 +28,7 @@ export const useRendererLifecycle = () => {
         if (!canvasRef.current) return;
 
         const renderer = new Renderer(canvasRef.current);
+        renderer.setDeviceLostHandler(setError);
         await renderer.init();
         renderer.setPerformanceCallback(setPerformanceMetrics);
         renderer.start();

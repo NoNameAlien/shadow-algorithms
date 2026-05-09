@@ -31,7 +31,7 @@ const BENCHMARK_CAMERA: Record<ScenePresetId, { startTheta: number; arc: number;
   aliasingTest: { startTheta: Math.PI * 0.06, arc: Math.PI * 0.28, phi: Math.PI * 0.34, distance: 10.5 },
   penumbraTest: { startTheta: Math.PI * 0.2, arc: Math.PI * 0.3, phi: Math.PI * 0.34, distance: 9.5 },
   multiLightTest: { startTheta: -Math.PI * 0.72, arc: Math.PI * 0.25, phi: Math.PI * 0.36, distance: 9.2 },
-  vsmBleedingTest: { startTheta: Math.atan2(4, 5), arc: Math.PI * 0.08, phi: Math.acos(3.5 / Math.hypot(4, 3.5, 5)), distance: Math.hypot(4, 3.5, 5) }
+  vsmBleedingTest: { startTheta: Math.PI * 0.34, arc: Math.PI * 0.34, phi: Math.PI * 0.36, distance: 13.2 }
 };
 
 export default function App() {
