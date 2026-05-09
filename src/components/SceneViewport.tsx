@@ -24,6 +24,7 @@ type Props = {
   onResetPerformanceMetrics: () => void;
   shadowDebugMode: ShadowDebugMode;
   shadowMethod: ShadowMethod;
+  benchmarkOverlay?: string | null;
 };
 
 const lightIcons: Record<LightMode, string> = {
@@ -52,7 +53,8 @@ export function SceneViewport({
   performanceMetrics,
   onResetPerformanceMetrics,
   shadowDebugMode,
-  shadowMethod
+  shadowMethod,
+  benchmarkOverlay
 }: Props) {
   const strings = STRINGS[lang];
   const debugLabel = shadowDebugSlotLabel(shadowDebugMode, shadowMethod);
@@ -103,6 +105,30 @@ export function SceneViewport({
               boxShadow: '0 8px 24px rgba(0, 0, 0, 0.28)'
             }}
           />
+        </div>
+      )}
+
+      {benchmarkOverlay && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 16,
+            bottom: 16,
+            zIndex: 4,
+            maxWidth: 'min(720px, calc(100% - 32px))',
+            padding: '6px 9px',
+            background: 'rgba(12, 14, 18, 0.78)',
+            border: '1px solid rgba(180, 196, 230, 0.55)',
+            borderRadius: 5,
+            color: '#f3f6ff',
+            fontSize: 13,
+            fontWeight: 700,
+            lineHeight: 1.25,
+            pointerEvents: 'none',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.28)'
+          }}
+        >
+          {benchmarkOverlay}
         </div>
       )}
 

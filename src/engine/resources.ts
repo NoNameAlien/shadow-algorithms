@@ -1,6 +1,10 @@
 import { createSolidTexture } from './textureUtils';
+import { LIGHTS_DATA_FLOATS, SHADING_FLOATS, SHADOW_MATS_FLOATS } from './uniformLayouts';
 
-type GeometryBufferData = Float32Array<ArrayBuffer> | Uint16Array<ArrayBuffer>;
+type GeometryBufferData =
+  | Float32Array<ArrayBuffer>
+  | Uint16Array<ArrayBuffer>
+  | Uint32Array<ArrayBuffer>;
 
 export type DepthResource = {
   texture: GPUTexture;
@@ -173,9 +177,6 @@ export function createBufferFromData(
 
 export function createUniformBuffers(device: GPUDevice): UniformBuffers {
   const uniformSize = 16 * 4 * 3 + 4 * 4 * 3;
-  const maxLights = 8;
-  const lightStructFloats = 16;
-  const lightsBufferSize = (8 + maxLights * lightStructFloats) * 4;
 
   return {
     uniformBuf: device.createBuffer({
@@ -187,7 +188,7 @@ export function createUniformBuffers(device: GPUDevice): UniformBuffers {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     shadingBuf: device.createBuffer({
-      size: 96,
+      size: SHADING_FLOATS * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     gridParamsBuf: device.createBuffer({
@@ -199,11 +200,11 @@ export function createUniformBuffers(device: GPUDevice): UniformBuffers {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     shadowMatsBuf: device.createBuffer({
-      size: (8 + 8 * 16) * 4,
+      size: SHADOW_MATS_FLOATS * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }),
     lightsBuf: device.createBuffer({
-      size: lightsBufferSize,
+      size: LIGHTS_DATA_FLOATS * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     })
   };

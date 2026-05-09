@@ -7,7 +7,7 @@ import { LightControls } from './LightControls';
 import { ObjectControls } from './ObjectControls';
 import { SceneControls } from './SceneControls';
 import { ShadowSettings } from './ShadowSettings';
-import { dangerButtonStyle, panelStyle, primaryButtonStyle } from './styles';
+import { dangerButtonStyle, panelStyle } from './styles';
 import type { ControlPanelProps, ShadowParams } from './types';
 
 export function ControlPanel({
@@ -15,7 +15,6 @@ export function ControlPanel({
   onLoadModel,
   onResetScene,
   onResetModel,
-  onLightingPreset,
   activeScenePreset,
   onScenePresetChange,
   onLoadObjectTexture,
@@ -133,22 +132,6 @@ export function ControlPanel({
     onResetModel?.();
     setModelName(null);
     if (modelInputRef.current) modelInputRef.current.value = '';
-  };
-
-  const applyLightingPreset = () => {
-    const presetParams: ShadowParams = {
-      ...INITIAL_PARAMS,
-      method: 'PCF',
-      pcfSamples: 16,
-      ambientStrength: 0.36,
-      exposure: 0.92,
-      hemisphereSkyColor: [0.56, 0.62, 0.76],
-      hemisphereGroundColor: [0.16, 0.14, 0.13]
-    };
-    setParams(presetParams);
-    onParamsChange(presetParams);
-    onLightingPreset?.();
-    if (autoRotate) onToggleAutoRotate();
   };
 
   const handleScenePresetChange = (presetId: keyof typeof SCENE_PRESETS) => {
@@ -309,19 +292,6 @@ export function ControlPanel({
         onRunBenchmark={onRunBenchmark}
         isBenchmarkRunning={isBenchmarkRunning}
       />
-
-      <button
-        type="button"
-        onClick={applyLightingPreset}
-        style={{
-          ...primaryButtonStyle,
-          width: '100%',
-          padding: 8,
-          marginBottom: 8
-        }}
-      >
-        {lang === 'ru' ? 'Пресет света' : 'Lighting preset'}
-      </button>
 
       <button
         type="button"

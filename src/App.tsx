@@ -15,6 +15,7 @@ import {
 } from './utils/reportExport';
 import type { ShadowMethod } from './engine/types';
 import { SCENE_PRESETS, type ScenePresetId } from './engine/presets';
+import { getShadowMethodNotes, getShadowQualityLabel } from './utils/shadowQuality';
 
 const BENCHMARK_PRESETS: ScenePresetId[] = [
   'aliasingTest',
@@ -45,6 +46,7 @@ export default function App() {
   const { viewportProps, panelProps } = useSceneController(rendererRef);
   const [shadowParams, setShadowParams] = useState<ShadowParams>(INITIAL_PARAMS);
   const [isBenchmarkRunning, setIsBenchmarkRunning] = useState(false);
+  const [benchmarkOverlay, setBenchmarkOverlay] = useState<string | null>(null);
   const initialParamsAppliedRef = useRef(false);
 
   const handleShadowParamsChange = (params: ShadowParams) => {
@@ -84,17 +86,56 @@ export default function App() {
     }
   };
 
-  const captureBenchmarkScreenshot = async () => {
+  const drawScreenshotLabel = async (
+    sourceCanvas: HTMLCanvasElement,
+    label: string
+  ): Promise<string> => {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('Failed to prepare benchmark screenshot'));
+      image.src = sourceCanvas.toDataURL('image/jpeg', 0.78);
+    });
+
+    const output = document.createElement('canvas');
+    output.width = sourceCanvas.width;
+    output.height = sourceCanvas.height;
+    const ctx = output.getContext('2d');
+    if (!ctx) return sourceCanvas.toDataURL('image/jpeg', 0.78);
+
+    ctx.drawImage(image, 0, 0);
+    const dpr = Math.max(1, sourceCanvas.width / Math.max(1, sourceCanvas.clientWidth));
+    const x = Math.round(16 * dpr);
+    const y = output.height - Math.round(18 * dpr);
+    const fontSize = Math.max(13, Math.round(13 * dpr));
+    ctx.font = `700 ${fontSize}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    const metrics = ctx.measureText(label);
+    const paddingX = Math.round(8 * dpr);
+    const paddingY = Math.round(5 * dpr);
+    const boxHeight = fontSize + paddingY * 2;
+    ctx.fillStyle = 'rgba(12, 14, 18, 0.78)';
+    ctx.fillRect(x - paddingX, y - fontSize - paddingY, metrics.width + paddingX * 2, boxHeight);
+    ctx.strokeStyle = 'rgba(180, 196, 230, 0.55)';
+    ctx.strokeRect(x - paddingX, y - fontSize - paddingY, metrics.width + paddingX * 2, boxHeight);
+    ctx.fillStyle = '#f3f6ff';
+    ctx.fillText(label, x, y);
+    return output.toDataURL('image/jpeg', 0.78);
+  };
+
+  const captureBenchmarkScreenshot = async (label?: string) => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
 
     await waitForFrames(1);
     return {
-      dataUrl: canvas.toDataURL('image/jpeg', 0.72),
+      dataUrl: label ? await drawScreenshotLabel(canvas, label) : canvas.toDataURL('image/jpeg', 0.72),
       width: canvas.width,
       height: canvas.height
     };
   };
+
+  const createBenchmarkOverlayLabel = (sceneLabel: string, params: ShadowParams) =>
+    `${sceneLabel} | ${params.method} | ${getShadowQualityLabel(params, 'en')} | ${params.shadowMapSize}px | ${getShadowMethodNotes(params)}`;
 
   const runSmoothBenchmarkOrbit = async (
     config: { startTheta: number; arc: number; phi: number; distance: number },
@@ -158,12 +199,14 @@ export default function App() {
 
           renderer.updateShadowParams(methodParams);
           renderer.setBenchmarkOrbitView(cameraConfig.startTheta, cameraConfig.phi, cameraConfig.distance);
+          const overlayLabel = createBenchmarkOverlayLabel(preset.label.en, methodParams);
+          setBenchmarkOverlay(overlayLabel);
           await waitForFrames(4);
           await wait(warmupMs);
           renderer.resetPerformanceMetrics();
           await runSmoothBenchmarkOrbit(cameraConfig, sampleMs);
 
-          const screenshot = await captureBenchmarkScreenshot();
+          const screenshot = await captureBenchmarkScreenshot(overlayLabel);
           samples.push(createBenchmarkSample(
             presetId,
             preset.label.en,
@@ -194,6 +237,7 @@ export default function App() {
       renderer.importScene(originalScene);
       renderer.setObjectAutoRotate(originalAutoRotate);
       setShadowParams(originalParams);
+      setBenchmarkOverlay(null);
       setIsBenchmarkRunning(false);
     }
   };
@@ -225,6 +269,7 @@ export default function App() {
         onResetPerformanceMetrics={resetPerformanceMetrics}
         shadowDebugMode={shadowParams.debugShadowMap ?? 'off'}
         shadowMethod={shadowParams.method}
+        benchmarkOverlay={benchmarkOverlay}
         {...viewportProps}
       />
       <ControlPanel

@@ -1,5 +1,6 @@
-export const MAX_LIGHTS = 8;
-export const MAX_SHADOW_SLOTS = 8;
+import { MAX_LIGHTS, MAX_SHADOW_SLOTS } from "./uniformLayouts";
+
+export { MAX_LIGHTS, MAX_SHADOW_SLOTS };
 
 export type ShadowSlotAssignment = {
   lightIndex: number;

@@ -3,6 +3,7 @@ import { HelpMark, RangeControl, SelectControl } from './FormControls';
 import { PanelSection } from './PanelSection';
 import { colorInputStyle, subtleButtonStyle } from './styles';
 import type { ControlPanelStrings, ShadowDebugMode, ShadowParams } from './types';
+import { getShadowQualityPreset, SHADOW_QUALITY_PRESETS } from '../../utils/shadowQuality';
 
 type Props = {
   params: ShadowParams;
@@ -54,58 +55,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
     { value: 'activeFalloff' as const, label: isRu ? 'Активное затухание' : 'Active falloff' },
     { value: 'activeShadow' as const, label: isRu ? 'Активная тень' : 'Active shadow' }
   ];
-  const qualityPresets: Array<{ label: string; params: Partial<ShadowParams> }> = [
-    {
-      label: isRu ? 'Raw' : 'Raw',
-      params: {
-        method: 'SM',
-        shadowMapSize: 512,
-        bias: 0.006,
-        pcfRadius: 0.5,
-        pcfSamples: 4,
-        pcssLightSize: 0.02,
-        pcssBlockerSearchSamples: 8,
-        vsmLightBleedReduction: 0.55,
-        shadowStrength: 1.15
-      }
-    },
-    {
-      label: isRu ? 'Низк.' : 'Low',
-      params: {
-        shadowMapSize: 1024,
-        bias: 0.006,
-        pcfRadius: 1.25,
-        pcfSamples: 4,
-        pcssLightSize: 0.04,
-        pcssBlockerSearchSamples: 8,
-        vsmLightBleedReduction: 0.5
-      }
-    },
-    {
-      label: isRu ? 'Сред.' : 'Medium',
-      params: {
-        shadowMapSize: 2048,
-        bias: 0.003,
-        pcfRadius: 2.5,
-        pcfSamples: 8,
-        pcssLightSize: 0.08,
-        pcssBlockerSearchSamples: 8,
-        vsmLightBleedReduction: 0.4
-      }
-    },
-    {
-      label: isRu ? 'Выс.' : 'High',
-      params: {
-        shadowMapSize: 4096,
-        bias: 0.0015,
-        pcfRadius: 4,
-        pcfSamples: 32,
-        pcssLightSize: 0.14,
-        pcssBlockerSearchSamples: 32,
-        vsmLightBleedReduction: 0.3
-      }
-    }
-  ];
+  const activeQuality = getShadowQualityPreset(params);
 
   return (
     <>
@@ -122,18 +72,33 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
         />
 
         <div style={{ marginBottom: 8 }}>
-          <div style={{ fontSize: 13, marginBottom: 5, opacity: 0.85 }}>{strings.qualityPreset}</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, marginBottom: 5 }}>
+            <span style={{ opacity: 0.85 }}>{strings.qualityPreset}</span>
+            <span style={{ color: activeQuality ? '#9ec5ff' : '#c7ccd6', fontWeight: 700 }}>
+              {isRu ? 'Активно' : 'Active'}: {activeQuality?.label[isRu ? 'ru' : 'en'] ?? (isRu ? 'Польз.' : 'Custom')}
+            </span>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 5 }}>
-            {qualityPresets.map((preset) => (
+            {SHADOW_QUALITY_PRESETS.map((preset) => {
+              const isActive = activeQuality?.id === preset.id;
+              return (
               <button
-                key={preset.label}
+                key={preset.id}
                 type="button"
                 onClick={() => onUpdate(preset.params)}
-                style={{ ...subtleButtonStyle, padding: '4px 5px', fontSize: 11 }}
+                style={{
+                  ...subtleButtonStyle,
+                  padding: '4px 5px',
+                  fontSize: 11,
+                  borderColor: isActive ? '#6aa8ff' : subtleButtonStyle.borderColor,
+                  background: isActive ? 'rgba(68, 132, 220, 0.28)' : subtleButtonStyle.background,
+                  color: isActive ? '#f4f8ff' : subtleButtonStyle.color
+                }}
               >
-                {preset.label}
+                {preset.label[isRu ? 'ru' : 'en']}
               </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       </PanelSection>

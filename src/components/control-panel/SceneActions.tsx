@@ -35,7 +35,7 @@ export function SceneActions({
   return (
     <PanelSection title={lang === 'ru' ? 'Сцена и экспорт' : 'Scene & export'}>
       <SelectControl
-        label={lang === 'ru' ? 'Preset сцена' : 'Scene preset'}
+        label={lang === 'ru' ? 'Сцена' : 'Scene'}
         value={activeScenePreset}
         options={[
           { value: 'custom' as const, label: lang === 'ru' ? 'Пользовательская' : 'Custom' },
