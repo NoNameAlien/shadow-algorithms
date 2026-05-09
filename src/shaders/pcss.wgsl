@@ -44,9 +44,9 @@ fn findBlockerDistance(uv: vec2<f32>, zReceiver: f32, searchRadius: f32, lightIn
   return vec2<f32>(avgBlockerDepth, numBlockers);
 }
 
-fn pcfFilter(uv: vec2<f32>, zReceiver: f32, filterRadius: f32, lightIndex: i32) -> f32 {
+fn pcfFilter(uv: vec2<f32>, zReceiver: f32, filterRadius: f32, lightIndex: i32, bias: f32) -> f32 {
   let texelSize = shadowTexelSize(u.shadowParams);
-  let depth = zReceiver - shadowBias(u.shadowParams);
+  let depth = zReceiver - bias;
   
   var shadow: f32 = 0.0;
   
@@ -64,7 +64,7 @@ fn penumbraSize(zReceiver: f32, zBlocker: f32) -> f32 {
   return max((zReceiver - zBlocker) * lightSize / zBlocker, 0.0);
 }
 
-fn samplePCSS(lightSpacePos: vec4<f32>, lightIndex: i32) -> f32 {
+fn samplePCSS(lightSpacePos: vec4<f32>, lightIndex: i32, bias: f32) -> f32 {
   let sample = makeUnbiasedShadowSample(lightSpacePos);
   let zReceiver = sample.depth;
   
@@ -80,7 +80,7 @@ fn samplePCSS(lightSpacePos: vec4<f32>, lightIndex: i32) -> f32 {
   let filterRadius = max(penumbra * 50.0, 1.0);
   
   // ВСЕГДА выполняем PCF (uniform control flow)
-  let pcfResult = pcfFilter(sample.uv, zReceiver, filterRadius, lightIndex);
+  let pcfResult = pcfFilter(sample.uv, zReceiver, filterRadius, lightIndex, bias);
   
   // Если нет блокеров → 1.0 (полностью освещено)
   // Если есть блокеры → результат PCF
@@ -104,9 +104,10 @@ fn computeLightContribution(
   var vis: f32 = 1.0;
   if (isShadowed && lightIndex >= 0) {
     let lsMat = shadowMats.mats[lightIndex];
-    let biasedWorldPos = worldPos + N * receiverNormalBias(N, L, u.shadowParams);
+    let bias = shadowBiasForLight(light, u.shadowParams);
+    let biasedWorldPos = worldPos + N * receiverNormalBiasForLight(light, N, L, u.shadowParams);
     let lightSpacePos = lsMat * vec4<f32>(biasedWorldPos, 1.0);
-    let rawVisibility = samplePCSS(lightSpacePos, lightIndex);
+    let rawVisibility = samplePCSS(lightSpacePos, lightIndex, bias);
     vis = mixShadowStrength(rawVisibility, shading.shadowStrength);
   }
 
@@ -139,7 +140,11 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   var diffuseSum: vec3<f32> = vec3<f32>(0.0);
   var specularSum: vec3<f32> = vec3<f32>(0.0);
   var visibilitySum: f32 = 0.0;
+  var activeCone: f32 = 0.0;
+  var activeFalloff: f32 = 0.0;
+  var activeVisibility: f32 = 1.0;
   let receive = objParams.base.w;
+  let activeLightIndex = i32(round(shading.activeLightIndex));
 
   for (var i = 0; i < lightCount; i = i + 1) {
     let light = lightsData.lights[i];
@@ -150,6 +155,11 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     diffuseSum = diffuseSum + contrib.diffuse;
     specularSum = specularSum + contrib.specular;
     visibilitySum = visibilitySum + contrib.visibility;
+    if (i == activeLightIndex) {
+      activeCone = computeSpotFactor(light, worldPos);
+      activeFalloff = computeDistanceFalloff(light, worldPos);
+      activeVisibility = contrib.visibility;
+    }
   }
 
   let diffuse = diffuseSum;
@@ -172,6 +182,15 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   }
   if (debugMode == LIGHT_DEBUG_NORMALS) {
     return vec4<f32>(N * 0.5 + vec3<f32>(0.5), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_ACTIVE_CONE) {
+    return vec4<f32>(vec3<f32>(activeCone), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_ACTIVE_FALLOFF) {
+    return vec4<f32>(vec3<f32>(activeFalloff), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_ACTIVE_SHADOW) {
+    return vec4<f32>(vec3<f32>(activeVisibility), 1.0);
   }
 
   let finalColor = toneMap((baseColor * (ambient + diffuse) + specularSum * 0.45) * exposure);

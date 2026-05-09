@@ -9,6 +9,7 @@ type Props = {
   count: number;
   activeIndex: number;
   names: string[];
+  badges?: string[];
   lang: Lang;
   addTitle: string;
   removeTitle: string;
@@ -25,6 +26,7 @@ export function EntitySelector({
   count,
   activeIndex,
   names,
+  badges,
   lang,
   addTitle,
   removeTitle,
@@ -100,13 +102,32 @@ export function EntitySelector({
                 ...buttonStyle,
                 maxWidth: 140,
                 minWidth: 32,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
                 overflow: 'hidden',
-                textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
                 background: activeIndex === index ? '#3b5bdb' : '#252a34'
               }}
             >
-              {names[index] || `${prefix}${index + 1}`}
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {names[index] || `${prefix}${index + 1}`}
+              </span>
+              {badges?.[index] ? (
+                <span
+                  style={{
+                    flex: '0 0 auto',
+                    padding: '1px 4px',
+                    borderRadius: 4,
+                    fontSize: 10,
+                    lineHeight: 1.2,
+                    background: activeIndex === index ? '#243a91' : '#343a46',
+                    color: '#dbe4ff'
+                  }}
+                >
+                  {badges[index]}
+                </span>
+              ) : null}
             </button>
           )
         ))}

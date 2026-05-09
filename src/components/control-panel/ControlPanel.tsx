@@ -58,6 +58,8 @@ export function ControlPanel({
   lightCount,
   activeLightIndex,
   lightNames,
+  lightShadowSlots,
+  activeLightDiagnostics,
   onSelectLight,
   onAddLight,
   onRemoveLight,
@@ -74,6 +76,8 @@ export function ControlPanel({
   onExportCsv,
   onExportPdf,
   onExportScreenshot,
+  onRunBenchmark,
+  isBenchmarkRunning,
   objectColor,
   onObjectColorChange,
   objectScale,
@@ -149,10 +153,11 @@ export function ControlPanel({
 
   const handleScenePresetChange = (presetId: keyof typeof SCENE_PRESETS) => {
     const preset = SCENE_PRESETS[presetId];
-    if (preset.shadowMethod) {
+    if (preset.shadowMethod || preset.shadowParams) {
       const nextParams: ShadowParams = {
         ...params,
-        method: preset.shadowMethod
+        ...preset.shadowParams,
+        method: preset.shadowMethod ?? preset.shadowParams?.method ?? params.method
       };
       setParams(nextParams);
       onParamsChange(nextParams);
@@ -228,6 +233,8 @@ export function ControlPanel({
         lightCount={lightCount}
         activeLightIndex={activeLightIndex}
         lightNames={lightNames}
+        lightShadowSlots={lightShadowSlots}
+        activeLightDiagnostics={activeLightDiagnostics}
         onSelectLight={onSelectLight}
         onAddLight={onAddLight}
         onRemoveLight={onRemoveLight}
@@ -299,6 +306,8 @@ export function ControlPanel({
         onExportCsv={onExportCsv}
         onExportPdf={onExportPdf}
         onExportScreenshot={onExportScreenshot}
+        onRunBenchmark={onRunBenchmark}
+        isBenchmarkRunning={isBenchmarkRunning}
       />
 
       <button

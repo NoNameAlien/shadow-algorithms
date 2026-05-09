@@ -35,6 +35,7 @@ import { projectToScreen, raySphereHit } from "./interaction";
 import { createTextureFromImageFile } from "./textureUtils";
 import { validateSceneDTO } from "../utils/sceneValidation";
 import { SCENE_PRESETS, type ScenePresetId } from "./presets";
+import { MAX_LIGHTS, MAX_SHADOW_SLOTS, getShadowSlotLabels, selectShadowCasters } from "./shadows";
 import type {
   GPUCtx,
   LightDef,
@@ -51,8 +52,6 @@ import type {
 
 export type { LightMode, PerformanceMetrics, ShadowDebugMode, ShadowMethod } from "./types";
 
-const MAX_LIGHTS = 8;
-const MAX_SHADOW_SLOTS = 8;
 const SHADOW_MATS_HEADER_FLOATS = 8;
 const LIGHT_STRUCT_FLOATS = 16;
 const LIGHT_OFFSETS = {
@@ -325,6 +324,7 @@ export class Renderer {
       count: this.lights.length,
       activeIndex: this.activeLightIndex,
       names: this.lights.map((light, index) => light.name || `Light ${index + 1}`),
+      shadowSlots: getShadowSlotLabels(this.lights.length, this.getMaxShadowSlotsForMethod()),
     };
   }
 
@@ -717,6 +717,15 @@ export class Renderer {
     this.objectAutoRotate = enabled;
   }
 
+  getObjectAutoRotate() {
+    return this.objectAutoRotate;
+  }
+
+  setBenchmarkOrbitView(theta: number, phi: number, distance: number) {
+    this.cameraController.setOrbitView(theta, phi, distance);
+    this.updateViewProj();
+  }
+
   setFloorVisible(visible: boolean) {
     this.showFloor = visible;
   }
@@ -751,14 +760,7 @@ export class Renderer {
   }
 
   private getShadowCasters(max: number): number[] {
-    const result: number[] = [];
-
-    for (let i = 0; i < this.lights.length; i++) {
-      result.push(i);
-      if (result.length >= max) break;
-    }
-
-    return result;
+    return selectShadowCasters(this.lights.length, max);
   }
 
   private getMaxShadowSlotsForMethod(): number {
@@ -2125,11 +2127,20 @@ export class Renderer {
   }
 
   private writeLightProjection(light: LightDef | undefined, out: mat4, method: ShadowMethod) {
-    if (light?.type === "spot" && method !== "VSM") {
-      const outerConeRad = (Math.max(1, Math.min(70, light.outerConeDeg)) * Math.PI) / 180;
-      const fovY = Math.max(2 * Math.PI / 180, Math.min(140 * Math.PI / 180, outerConeRad * 2));
+    if (light?.type === "spot") {
+      const range = Math.max(4, light.range);
+      const outerConeRad = (Math.max(1, Math.min(78, light.outerConeDeg)) * Math.PI) / 180;
+      const far = Math.max(8, range * 1.45);
       const near = 0.05;
-      const far = Math.max(near + 0.1, light.range);
+
+      if (method === "VSM") {
+        const coneRadius = Math.tan(outerConeRad) * range;
+        const size = Math.max(4, Math.min(24, coneRadius * 1.15));
+        orthoZO(out, -size, size, -size, size, near, far);
+        return;
+      }
+
+      const fovY = Math.max(2 * Math.PI / 180, Math.min(156 * Math.PI / 180, outerConeRad * 2.1));
       perspectiveZO(out, fovY, 1, near, far);
       return;
     }
@@ -2152,7 +2163,7 @@ export class Renderer {
     dir[1] = Math.sin(light.pitch);
     dir[2] = Math.cos(light.pitch) * Math.cos(light.yaw);
     vec3.normalize(dir, dir);
-    vec3.scaleAndAdd(target, light.pos, dir, 10.0);
+    vec3.scaleAndAdd(target, light.pos, dir, Math.max(10.0, light.range * 0.75));
     return target;
   }
 
@@ -2341,6 +2352,7 @@ export class Renderer {
 
   getLightInfo() {
     const active = this.lights[this.activeLightIndex];
+    const diagnostics = this.getActiveLightDiagnostics();
     if (!active) {
       return {
         mode: this.lightMode,
@@ -2352,6 +2364,7 @@ export class Renderer {
         outerConeDeg: 28,
         range: 12,
         falloff: 1.5,
+        diagnostics,
       };
     }
     return {
@@ -2368,6 +2381,37 @@ export class Renderer {
       outerConeDeg: active.outerConeDeg,
       range: active.range,
       falloff: active.falloff,
+      diagnostics,
+    };
+  }
+
+  getActiveLightDiagnostics() {
+    const active = this.lights[this.activeLightIndex];
+    const shadowSlot = getShadowSlotLabels(this.lights.length, this.getMaxShadowSlotsForMethod())[this.activeLightIndex] ?? null;
+    const method = this.shadowParams.method;
+    const isSpot = active?.type === "spot";
+    const shadowProjection: "perspective" | "orthographic" | "none" = !active
+      ? "none"
+      : isSpot && method !== "VSM"
+        ? "perspective"
+        : "orthographic";
+    const range = active?.range ?? null;
+    const outerConeDeg = active?.outerConeDeg ?? null;
+    const outerConeRad = outerConeDeg === null ? 0 : (Math.max(1, Math.min(78, outerConeDeg)) * Math.PI) / 180;
+    const coneRadius = range === null ? 0 : Math.tan(outerConeRad) * range;
+
+    return {
+      shadowSlot,
+      castsShadow: active?.castShadows ?? false,
+      shadowProjection,
+      shadowFar: !active ? null : isSpot ? Math.max(8, (active.range ?? 0) * 1.45) : 20,
+      effectiveBias: method === "VSM"
+        ? this.shadowParams.vsmMinVariance
+        : this.shadowParams.bias * (isSpot ? 0.08 : 1),
+      cone: isSpot ? [active.innerConeDeg, active.outerConeDeg] as [number, number] : null,
+      range: isSpot ? active.range : null,
+      falloff: isSpot ? active.falloff : null,
+      shadowOrthoSize: isSpot && method === "VSM" ? Math.max(4, Math.min(24, coneRadius * 1.15)) : null,
     };
   }
 
@@ -2522,7 +2566,7 @@ export class Renderer {
       shadingData[8] = this.shadowParams.ambientStrength ?? 0.4;
       shadingData[9] = this.shadowParams.exposure ?? 0.9;
       shadingData[10] = this.getLightDebugModeIndex();
-      shadingData[11] = 0;
+      shadingData[11] = this.activeLightIndex;
       const sky = this.shadowParams.hemisphereSkyColor ?? [0.62, 0.68, 0.78];
       const ground = this.shadowParams.hemisphereGroundColor ?? [0.18, 0.16, 0.14];
       shadingData[12] = sky[0];
@@ -3035,7 +3079,7 @@ export class Renderer {
     debugPass.end();
   }
 
-  private getPerformanceMetrics(): PerformanceMetrics {
+  getPerformanceMetrics(): PerformanceMetrics {
     const history = this.frameTimeHistory.slice();
     const recentFpsSamples = this.fpsSampleHistory.length ? this.fpsSampleHistory : [this.currentFps];
     const elapsedMs = Math.max(0, performance.now() - this.performanceStartTime);
@@ -3065,6 +3109,9 @@ export class Renderer {
     if (mode === "specular") return 3;
     if (mode === "shadow") return 4;
     if (mode === "normals") return 5;
+    if (mode === "activeCone") return 6;
+    if (mode === "activeFalloff") return 7;
+    if (mode === "activeShadow") return 8;
     return 0;
   }
 
@@ -3387,10 +3434,11 @@ export class Renderer {
     this.createGrid();
     this.createWalls();
 
-    if (preset.shadowMethod) {
+    if (preset.shadowMethod || preset.shadowParams) {
       this.updateShadowParams({
         ...this.shadowParams,
-        method: preset.shadowMethod,
+        ...preset.shadowParams,
+        method: preset.shadowMethod ?? preset.shadowParams?.method ?? this.shadowParams.method,
       });
     }
 

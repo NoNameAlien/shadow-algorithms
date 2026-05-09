@@ -12,6 +12,9 @@ const LIGHT_DEBUG_DIFFUSE: i32 = 2;
 const LIGHT_DEBUG_SPECULAR: i32 = 3;
 const LIGHT_DEBUG_SHADOW: i32 = 4;
 const LIGHT_DEBUG_NORMALS: i32 = 5;
+const LIGHT_DEBUG_ACTIVE_CONE: i32 = 6;
+const LIGHT_DEBUG_ACTIVE_FALLOFF: i32 = 7;
+const LIGHT_DEBUG_ACTIVE_SHADOW: i32 = 8;
 const MAX_LIGHTS: u32 = 8u;
 
 struct ShadingParams {
@@ -26,7 +29,7 @@ struct ShadingParams {
   ambientStrength: f32,
   exposure: f32,
   lightDebugMode: f32,
-  _pad0: f32,
+  activeLightIndex: f32,
   skyAmbient: vec4<f32>,
   groundAmbient: vec4<f32>,
 };
@@ -73,6 +76,12 @@ fn lightDebugModeIndex(shadingParams: ShadingParams) -> i32 {
 
 fn shadowBias(shadowParams: vec4<f32>) -> f32 {
   return shadowParams.x;
+}
+
+fn shadowBiasForLight(light: Light, shadowParams: vec4<f32>) -> f32 {
+  let mode = i32(round(light.lightType));
+  let scale = select(1.0, 0.08, mode == LIGHT_MODE_SPOT);
+  return shadowBias(shadowParams) * scale;
 }
 
 fn shadowParamY(shadowParams: vec4<f32>) -> f32 {
@@ -158,8 +167,8 @@ fn computeDistanceFalloff(light: Light, worldPos: vec3<f32>) -> f32 {
   let range = max(light.range, 0.001);
   let dist = distance(light.pos, worldPos);
   let normalized = clamp(dist / range, 0.0, 1.0);
-  let smoothRange = 1.0 - smoothstep(0.92, 1.0, normalized);
-  let distanceCurve = 1.0 / (1.0 + 1.25 * pow(normalized, max(light.falloff, 0.01)));
+  let smoothRange = 1.0 - smoothstep(0.96, 1.0, normalized);
+  let distanceCurve = 1.0 / (1.0 + 0.65 * pow(normalized, max(light.falloff, 0.01)));
   return smoothRange * distanceCurve;
 }
 
@@ -184,6 +193,11 @@ fn blinnPhongSpecular(
 fn receiverNormalBias(N: vec3<f32>, L: vec3<f32>, shadowParams: vec4<f32>) -> f32 {
   let ndotl = clamp(dot(N, L), 0.0, 1.0);
   return shadowBias(shadowParams) * (1.0 + (1.0 - ndotl) * 5.0);
+}
+
+fn receiverNormalBiasForLight(light: Light, N: vec3<f32>, L: vec3<f32>, shadowParams: vec4<f32>) -> f32 {
+  let ndotl = clamp(dot(N, L), 0.0, 1.0);
+  return shadowBiasForLight(light, shadowParams) * (1.0 + (1.0 - ndotl) * 5.0);
 }
 
 fn toneMap(color: vec3<f32>) -> vec3<f32> {

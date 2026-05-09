@@ -15,6 +15,8 @@ type Props = {
   onExportCsv?: () => void;
   onExportPdf?: () => void;
   onExportScreenshot?: () => void;
+  onRunBenchmark?: () => void;
+  isBenchmarkRunning?: boolean;
 };
 
 export function SceneActions({
@@ -26,7 +28,9 @@ export function SceneActions({
   onScenePresetChange,
   onExportCsv,
   onExportPdf,
-  onExportScreenshot
+  onExportScreenshot,
+  onRunBenchmark,
+  isBenchmarkRunning = false
 }: Props) {
   return (
     <PanelSection title={lang === 'ru' ? 'Сцена и экспорт' : 'Scene & export'}>
@@ -80,6 +84,27 @@ export function SceneActions({
           {lang === 'ru' ? 'Скрин' : 'Shot'}
         </button>
       </div>
+      <button
+        type="button"
+        onClick={onRunBenchmark}
+        disabled={isBenchmarkRunning}
+        style={{
+          ...primaryButtonStyle,
+          width: '100%',
+          padding: 6,
+          marginTop: 6,
+          cursor: isBenchmarkRunning ? 'wait' : 'pointer',
+          opacity: isBenchmarkRunning ? 0.72 : 1
+        }}
+      >
+        {isBenchmarkRunning
+          ? lang === 'ru'
+            ? 'Benchmark идет...'
+            : 'Benchmark running...'
+          : lang === 'ru'
+            ? 'Benchmark методов'
+            : 'Benchmark methods'}
+      </button>
       <input
         ref={sceneFileInputRef}
         type="file"

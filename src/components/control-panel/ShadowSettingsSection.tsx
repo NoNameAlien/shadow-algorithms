@@ -49,13 +49,62 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
     { value: 'diffuse' as const, label: isRu ? 'Диффузный свет' : 'Diffuse' },
     { value: 'specular' as const, label: isRu ? 'Блики' : 'Specular' },
     { value: 'shadow' as const, label: isRu ? 'Маска теней' : 'Shadow mask' },
-    { value: 'normals' as const, label: isRu ? 'Нормали' : 'Normals' }
+    { value: 'normals' as const, label: isRu ? 'Нормали' : 'Normals' },
+    { value: 'activeCone' as const, label: isRu ? 'Активный конус' : 'Active cone' },
+    { value: 'activeFalloff' as const, label: isRu ? 'Активное затухание' : 'Active falloff' },
+    { value: 'activeShadow' as const, label: isRu ? 'Активная тень' : 'Active shadow' }
   ];
-  const qualityPresets = [
-    { label: isRu ? 'Низк.' : 'Low', params: { shadowMapSize: 1024, bias: 0.006, pcfRadius: 1.5, pcfSamples: 4, pcssBlockerSearchSamples: 8, vsmLightBleedReduction: 0.5 } },
-    { label: isRu ? 'Сред.' : 'Medium', params: { shadowMapSize: 2048, bias: 0.003, pcfRadius: 2.5, pcfSamples: 8, pcssBlockerSearchSamples: 8, vsmLightBleedReduction: 0.4 } },
-    { label: isRu ? 'Выс.' : 'High', params: { shadowMapSize: 3072, bias: 0.002, pcfRadius: 3, pcfSamples: 16, pcssBlockerSearchSamples: 16, vsmLightBleedReduction: 0.35 } },
-    { label: isRu ? 'Ультра' : 'Ultra', params: { shadowMapSize: 4096, bias: 0.0015, pcfRadius: 4, pcfSamples: 32, pcssBlockerSearchSamples: 32, vsmLightBleedReduction: 0.3 } }
+  const qualityPresets: Array<{ label: string; params: Partial<ShadowParams> }> = [
+    {
+      label: isRu ? 'Raw' : 'Raw',
+      params: {
+        method: 'SM',
+        shadowMapSize: 512,
+        bias: 0.006,
+        pcfRadius: 0.5,
+        pcfSamples: 4,
+        pcssLightSize: 0.02,
+        pcssBlockerSearchSamples: 8,
+        vsmLightBleedReduction: 0.55,
+        shadowStrength: 1.15
+      }
+    },
+    {
+      label: isRu ? 'Низк.' : 'Low',
+      params: {
+        shadowMapSize: 1024,
+        bias: 0.006,
+        pcfRadius: 1.25,
+        pcfSamples: 4,
+        pcssLightSize: 0.04,
+        pcssBlockerSearchSamples: 8,
+        vsmLightBleedReduction: 0.5
+      }
+    },
+    {
+      label: isRu ? 'Сред.' : 'Medium',
+      params: {
+        shadowMapSize: 2048,
+        bias: 0.003,
+        pcfRadius: 2.5,
+        pcfSamples: 8,
+        pcssLightSize: 0.08,
+        pcssBlockerSearchSamples: 8,
+        vsmLightBleedReduction: 0.4
+      }
+    },
+    {
+      label: isRu ? 'Выс.' : 'High',
+      params: {
+        shadowMapSize: 4096,
+        bias: 0.0015,
+        pcfRadius: 4,
+        pcfSamples: 32,
+        pcssLightSize: 0.14,
+        pcssBlockerSearchSamples: 32,
+        vsmLightBleedReduction: 0.3
+      }
+    }
   ];
 
   return (

@@ -29,6 +29,8 @@ type Props = Pick<
   | 'onExportCsv'
   | 'onExportPdf'
   | 'onExportScreenshot'
+  | 'onRunBenchmark'
+  | 'isBenchmarkRunning'
 > & {
   lang: Lang;
   strings: ControlPanelStrings;
@@ -71,7 +73,9 @@ export function SceneControls({
   onScenePresetChange,
   onExportCsv,
   onExportPdf,
-  onExportScreenshot
+  onExportScreenshot,
+  onRunBenchmark,
+  isBenchmarkRunning
 }: Props) {
   return (
     <>
@@ -116,6 +120,8 @@ export function SceneControls({
         onExportCsv={onExportCsv}
         onExportPdf={onExportPdf}
         onExportScreenshot={onExportScreenshot}
+        onRunBenchmark={onRunBenchmark}
+        isBenchmarkRunning={isBenchmarkRunning}
       />
     </>
   );

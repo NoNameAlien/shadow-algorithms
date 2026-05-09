@@ -11,7 +11,17 @@ import type {
 
 const SHADOW_METHODS: readonly ShadowMethod[] = ['SM', 'PCF', 'PCSS', 'VSM'];
 const LIGHT_MODES: readonly LightMode[] = ['sun', 'spot', 'top'];
-const LIGHT_DEBUG_MODES: readonly LightDebugMode[] = ['final', 'lighting', 'diffuse', 'specular', 'shadow', 'normals'];
+const LIGHT_DEBUG_MODES: readonly LightDebugMode[] = [
+  'final',
+  'lighting',
+  'diffuse',
+  'specular',
+  'shadow',
+  'normals',
+  'activeCone',
+  'activeFalloff',
+  'activeShadow'
+];
 
 const DEFAULT_SHADOW_PARAMS: ShadowParamsDTO = {
   shadowMapSize: 2048,

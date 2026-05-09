@@ -8,7 +8,16 @@ export type LightMode = 'sun' | 'spot' | 'top';
 export type ShadowMethod = 'SM' | 'PCF' | 'PCSS' | 'VSM';
 export type ShadowDebugSlot = `slot${0 | 1 | 2 | 3 | 4 | 5 | 6 | 7}`;
 export type ShadowDebugMode = 'off' | 'primary' | 'secondary' | ShadowDebugSlot;
-export type LightDebugMode = 'final' | 'lighting' | 'diffuse' | 'specular' | 'shadow' | 'normals';
+export type LightDebugMode =
+  | 'final'
+  | 'lighting'
+  | 'diffuse'
+  | 'specular'
+  | 'shadow'
+  | 'normals'
+  | 'activeCone'
+  | 'activeFalloff'
+  | 'activeShadow';
 export type ScenePresetSelection = 'custom' | ScenePresetId;
 
 export type ShadowParams = {
@@ -33,6 +42,18 @@ export type ShadowParams = {
 export type MeshOption = { id: number; name: string };
 export type ObjectScale = [number, number, number];
 export type ControlPanelStrings = typeof import('./constants').STRINGS[Lang];
+
+export type LightDiagnostics = {
+  shadowSlot: number | null;
+  castsShadow: boolean;
+  shadowProjection: 'perspective' | 'orthographic' | 'none';
+  shadowFar: number | null;
+  effectiveBias: number;
+  cone: [number, number] | null;
+  range: number | null;
+  falloff: number | null;
+  shadowOrthoSize: number | null;
+};
 
 export type ControlPanelProps = {
   onParamsChange: (params: ShadowParams) => void;
@@ -74,6 +95,8 @@ export type ControlPanelProps = {
   lightCount: number;
   activeLightIndex: number;
   lightNames: string[];
+  lightShadowSlots: Array<number | null>;
+  activeLightDiagnostics: LightDiagnostics;
   onSelectLight: (index: number) => void;
   onAddLight: () => void;
   onRemoveLight: () => void;
@@ -90,6 +113,8 @@ export type ControlPanelProps = {
   onExportCsv?: () => void;
   onExportPdf?: () => void;
   onExportScreenshot?: () => void;
+  onRunBenchmark?: () => void;
+  isBenchmarkRunning?: boolean;
   objectColor: string;
   onObjectColorChange: (hex: string) => void;
   objectScale: ObjectScale;

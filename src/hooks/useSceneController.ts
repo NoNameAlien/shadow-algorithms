@@ -6,11 +6,12 @@ import { hexToRgb01, rgb01ToHex } from '../utils/color';
 import { downloadJsonFile, readJsonFile } from '../utils/sceneFile';
 import { validateSceneDTO } from '../utils/sceneValidation';
 import { SCENE_PRESETS, type ScenePresetId } from '../engine/presets';
-import type { ObjectScale, ScenePresetSelection } from '../components/control-panel/types';
+import type { LightDiagnostics, ObjectScale, ScenePresetSelection } from '../components/control-panel/types';
 
 type Lang = 'en' | 'ru';
 type MeshOption = { id: number; name: string };
 type EntityMeta = { count: number; activeIndex: number; names: string[] };
+type LightMeta = EntityMeta & { shadowSlots: Array<number | null> };
 
 type ObjectPanelState = {
   color: string;
@@ -32,6 +33,19 @@ type LightPanelState = {
   outerConeDeg: number;
   range: number;
   falloff: number;
+  diagnostics: LightDiagnostics;
+};
+
+const DEFAULT_LIGHT_DIAGNOSTICS: LightDiagnostics = {
+  shadowSlot: null,
+  castsShadow: false,
+  shadowProjection: 'none',
+  shadowFar: null,
+  effectiveBias: 0,
+  cone: null,
+  range: null,
+  falloff: null,
+  shadowOrthoSize: null
 };
 
 const DEFAULT_LIGHT_STATE: LightPanelState = {
@@ -41,7 +55,8 @@ const DEFAULT_LIGHT_STATE: LightPanelState = {
   innerConeDeg: 15,
   outerConeDeg: 28,
   range: 12,
-  falloff: 1.5
+  falloff: 1.5,
+  diagnostics: DEFAULT_LIGHT_DIAGNOSTICS
 };
 
 const DEFAULT_OBJECT_STATE: ObjectPanelState = {
@@ -57,12 +72,18 @@ const DEFAULT_OBJECT_STATE: ObjectPanelState = {
 };
 
 const DEFAULT_META: EntityMeta = { count: 1, activeIndex: 0, names: [] };
+const DEFAULT_LIGHT_META: LightMeta = { ...DEFAULT_META, shadowSlots: [] };
 
 const sameMeta = (left: EntityMeta, right: EntityMeta) =>
   left.count === right.count &&
   left.activeIndex === right.activeIndex &&
   left.names.length === right.names.length &&
   left.names.every((name, index) => name === right.names[index]);
+
+const sameLightMeta = (left: LightMeta, right: LightMeta) =>
+  sameMeta(left, right) &&
+  left.shadowSlots.length === right.shadowSlots.length &&
+  left.shadowSlots.every((slot, index) => slot === right.shadowSlots[index]);
 
 const sameMeshes = (left: MeshOption[], right: MeshOption[]) =>
   left.length === right.length &&
@@ -101,7 +122,17 @@ const sameLightState = (left: LightPanelState, right: LightPanelState) =>
   left.innerConeDeg === right.innerConeDeg &&
   left.outerConeDeg === right.outerConeDeg &&
   left.range === right.range &&
-  left.falloff === right.falloff;
+  left.falloff === right.falloff &&
+  left.diagnostics.shadowSlot === right.diagnostics.shadowSlot &&
+  left.diagnostics.castsShadow === right.diagnostics.castsShadow &&
+  left.diagnostics.shadowProjection === right.diagnostics.shadowProjection &&
+  left.diagnostics.shadowFar === right.diagnostics.shadowFar &&
+  left.diagnostics.effectiveBias === right.diagnostics.effectiveBias &&
+  left.diagnostics.cone?.[0] === right.diagnostics.cone?.[0] &&
+  left.diagnostics.cone?.[1] === right.diagnostics.cone?.[1] &&
+  left.diagnostics.range === right.diagnostics.range &&
+  left.diagnostics.falloff === right.diagnostics.falloff &&
+  left.diagnostics.shadowOrthoSize === right.diagnostics.shadowOrthoSize;
 
 const syncState = <T,>(setter: (updater: (previous: T) => T) => void, next: T, same: (left: T, right: T) => boolean) => {
   setter((previous) => (same(previous, next) ? previous : next));
@@ -119,7 +150,7 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   const [floorColor, setFloorColor] = useState('#26282d');
   const [wallColor, setWallColor] = useState('#1f2226');
   const [lightsScreen, setLightsScreen] = useState<LightScreenPosition[]>([]);
-  const [lightMeta, setLightMeta] = useState<EntityMeta>(DEFAULT_META);
+  const [lightMeta, setLightMeta] = useState<LightMeta>(DEFAULT_LIGHT_META);
   const [objectMeta, setObjectMeta] = useState<EntityMeta>(DEFAULT_META);
   const [meshOptions, setMeshOptions] = useState<MeshOption[]>([]);
   const [lightState, setLightState] = useState<LightPanelState>(DEFAULT_LIGHT_STATE);
@@ -131,7 +162,7 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
     if (!renderer) return;
 
     syncState(setLightsScreen, renderer.getAllLightsScreenPositions(), sameLightsScreen);
-    syncState(setLightMeta, renderer.getLightsMeta(), sameMeta);
+    syncState(setLightMeta, renderer.getLightsMeta(), sameLightMeta);
     syncState(setObjectMeta, renderer.getObjectsMeta(), sameMeta);
     syncState(setMeshOptions, renderer.getMeshesMeta(), sameMeshes);
 
@@ -156,7 +187,8 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       innerConeDeg: lightInfo.innerConeDeg,
       outerConeDeg: lightInfo.outerConeDeg,
       range: lightInfo.range,
-      falloff: lightInfo.falloff
+      falloff: lightInfo.falloff,
+      diagnostics: lightInfo.diagnostics
     }, sameLightState);
   }, [rendererRef]);
 
@@ -472,6 +504,8 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       lightCount: lightMeta.count,
       activeLightIndex: lightMeta.activeIndex,
       lightNames: lightMeta.names,
+      lightShadowSlots: lightMeta.shadowSlots,
+      activeLightDiagnostics: lightState.diagnostics,
       onSelectLight: handleSelectLight,
       onAddLight: handleAddLight,
       onRemoveLight: handleRemoveLight,

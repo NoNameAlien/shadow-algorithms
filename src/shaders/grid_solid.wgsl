@@ -64,8 +64,8 @@ fn vs_main(input: VSIn) -> VSOut {
   return out;
 }
 
-fn shadowVisibilityFloor(lightSpacePos: vec4<f32>, lightIndex: i32) -> f32 {
-  let sample = makeShadowSample(lightSpacePos, shadowBias(u.shadowParams));
+fn shadowVisibilityFloor(lightSpacePos: vec4<f32>, lightIndex: i32, bias: f32) -> f32 {
+  let sample = makeShadowSample(lightSpacePos, bias);
   let method = shadowMethodIndex(shading);
 
   if (method == SHADOW_METHOD_VSM) {
@@ -135,9 +135,10 @@ fn computeLightContributionFloor(
   var vis: f32 = 1.0;
   if (isShadowed && lightIndex >= 0) {
     let lsMat = shadowMats.mats[lightIndex];
-    let biasedWorldPos = worldPos + N * receiverNormalBias(N, L, u.shadowParams);
+    let bias = shadowBiasForLight(light, u.shadowParams);
+    let biasedWorldPos = worldPos + N * receiverNormalBiasForLight(light, N, L, u.shadowParams);
     let biasedLightSpacePos = lsMat * vec4<f32>(biasedWorldPos, 1.0);
-    let rawVisibility = shadowVisibilityFloor(biasedLightSpacePos, lightIndex);
+    let rawVisibility = shadowVisibilityFloor(biasedLightSpacePos, lightIndex, bias);
     vis = mixShadowStrength(rawVisibility, shading.shadowStrength);
   }
 
@@ -182,6 +183,10 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   let lightCount = i32(round(lightsData.count));
   var diffuseSum: vec3<f32> = vec3<f32>(0.0);
   var visibilitySum: f32 = 0.0;
+  var activeCone: f32 = 0.0;
+  var activeFalloff: f32 = 0.0;
+  var activeVisibility: f32 = 1.0;
+  let activeLightIndex = i32(round(shading.activeLightIndex));
 
   for (var i = 0; i < lightCount; i = i + 1) {
     let light = lightsData.lights[i];
@@ -197,6 +202,11 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     );
     diffuseSum = diffuseSum + contrib.diffuse;
     visibilitySum = visibilitySum + contrib.visibility;
+    if (i == activeLightIndex) {
+      activeCone = computeSpotFactor(light, worldPos);
+      activeFalloff = computeDistanceFalloff(light, worldPos);
+      activeVisibility = contrib.visibility;
+    }
   }
 
   let diffuse = diffuseSum;
@@ -219,6 +229,15 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   }
   if (debugMode == LIGHT_DEBUG_NORMALS) {
     return vec4<f32>(N * 0.5 + vec3<f32>(0.5), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_ACTIVE_CONE) {
+    return vec4<f32>(vec3<f32>(activeCone), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_ACTIVE_FALLOFF) {
+    return vec4<f32>(vec3<f32>(activeFalloff), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_ACTIVE_SHADOW) {
+    return vec4<f32>(vec3<f32>(activeVisibility), 1.0);
   }
 
   let finalColor = toneMap(baseColor * (ambient + diffuse) * exposure);

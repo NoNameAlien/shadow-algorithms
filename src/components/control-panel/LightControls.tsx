@@ -23,6 +23,8 @@ type Props = Pick<
   | 'lightCount'
   | 'activeLightIndex'
   | 'lightNames'
+  | 'lightShadowSlots'
+  | 'activeLightDiagnostics'
   | 'onSelectLight'
   | 'onAddLight'
   | 'onRemoveLight'
@@ -54,6 +56,8 @@ export function LightControls({
   lightCount,
   activeLightIndex,
   lightNames,
+  lightShadowSlots,
+  activeLightDiagnostics,
   onSelectLight,
   onAddLight,
   onRemoveLight,
@@ -67,6 +71,7 @@ export function LightControls({
         count={lightCount}
         activeIndex={activeLightIndex}
         names={lightNames}
+        badges={lightShadowSlots.map((slot) => (slot === null ? (lang === 'ru' ? 'нет' : 'none') : `S${slot}`))}
         lang={lang}
         addTitle={lang === 'ru' ? 'Добавить источник' : 'Add light'}
         removeTitle={lang === 'ru' ? 'Удалить источник (кроме первого)' : 'Remove light (except first)'}
@@ -88,6 +93,8 @@ export function LightControls({
         spotOuterConeDeg={spotOuterConeDeg}
         spotRange={spotRange}
         spotFalloff={spotFalloff}
+        shadowSlot={lightShadowSlots[activeLightIndex] ?? null}
+        diagnostics={activeLightDiagnostics}
         onLightModeChange={onLightModeChange}
         onLightIntensityChange={onLightIntensityChange}
         onLightColorChange={onLightColorChange}

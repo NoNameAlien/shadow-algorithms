@@ -261,6 +261,13 @@ export class CameraController {
         console.log('Camera reset to orbit mode');
     }
 
+    setOrbitView(theta: number, phi: number, distance = this.distance) {
+        this.mode = 'orbit';
+        this.theta = theta;
+        this.phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi));
+        this.distance = Math.max(2, Math.min(30, distance));
+        this.updateOrbit(0);
+    }
 
     isLocked(): boolean {
         return this.isPointerLocked;

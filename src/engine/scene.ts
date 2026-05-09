@@ -27,9 +27,9 @@ export function createDefaultLights(params: {
       color: vec3.fromValues(1.0, 1.0, 1.0),
       castShadows: true,
       innerConeDeg: 15,
-      outerConeDeg: 25,
-      range: 14,
-      falloff: 1.6
+      outerConeDeg: 34,
+      range: 20,
+      falloff: 1.15
     },
     {
       name: 'Light 2',
@@ -41,9 +41,9 @@ export function createDefaultLights(params: {
       color: vec3.fromValues(1.0, 0.9, 0.7),
       castShadows: false,
       innerConeDeg: 18,
-      outerConeDeg: 34,
-      range: 12,
-      falloff: 1.4
+      outerConeDeg: 42,
+      range: 18,
+      falloff: 1.15
     }
   ];
 }
@@ -86,9 +86,9 @@ export function createLight(params: {
     color: params.def?.color ? vec3.clone(params.def.color) : vec3.fromValues(1.0, 1.0, 1.0),
     castShadows: params.def?.castShadows ?? false,
     innerConeDeg: params.def?.innerConeDeg ?? 15,
-    outerConeDeg: params.def?.outerConeDeg ?? 28,
-    range: params.def?.range ?? 12,
-    falloff: params.def?.falloff ?? 1.5
+    outerConeDeg: params.def?.outerConeDeg ?? 38,
+    range: params.def?.range ?? 20,
+    falloff: params.def?.falloff ?? 1.15
   };
 }
 

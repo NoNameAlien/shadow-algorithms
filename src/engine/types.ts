@@ -12,7 +12,16 @@ export type ShadowMethod = 'SM' | 'PCF' | 'PCSS' | 'VSM';
 export type LightMode = 'sun' | 'spot' | 'top';
 export type ShadowDebugSlot = `slot${0 | 1 | 2 | 3 | 4 | 5 | 6 | 7}`;
 export type ShadowDebugMode = 'off' | 'primary' | 'secondary' | ShadowDebugSlot;
-export type LightDebugMode = 'final' | 'lighting' | 'diffuse' | 'specular' | 'shadow' | 'normals';
+export type LightDebugMode =
+  | 'final'
+  | 'lighting'
+  | 'diffuse'
+  | 'specular'
+  | 'shadow'
+  | 'normals'
+  | 'activeCone'
+  | 'activeFalloff'
+  | 'activeShadow';
 
 export type PerformanceMetrics = {
   fps: number;

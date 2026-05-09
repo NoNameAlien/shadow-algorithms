@@ -87,7 +87,11 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   var diffuseSum: vec3<f32> = vec3<f32>(0.0);
   var specularSum: vec3<f32> = vec3<f32>(0.0);
   var visibilitySum: f32 = 0.0;
+  var activeCone: f32 = 0.0;
+  var activeFalloff: f32 = 0.0;
+  var activeVisibility: f32 = 1.0;
   let receive = objParams.base.w;
+  let activeLightIndex = i32(round(shading.activeLightIndex));
 
   for (var i = 0; i < lightCount; i = i + 1) {
     let light = lightsData.lights[i];
@@ -98,6 +102,11 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     diffuseSum = diffuseSum + contrib.diffuse;
     specularSum = specularSum + contrib.specular;
     visibilitySum = visibilitySum + contrib.visibility;
+    if (i == activeLightIndex) {
+      activeCone = computeSpotFactor(light, worldPos);
+      activeFalloff = computeDistanceFalloff(light, worldPos);
+      activeVisibility = contrib.visibility;
+    }
   }
 
   let exposure = max(shading.exposure, 0.0);
@@ -119,6 +128,15 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
   }
   if (debugMode == LIGHT_DEBUG_NORMALS) {
     return vec4<f32>(N * 0.5 + vec3<f32>(0.5), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_ACTIVE_CONE) {
+    return vec4<f32>(vec3<f32>(activeCone), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_ACTIVE_FALLOFF) {
+    return vec4<f32>(vec3<f32>(activeFalloff), 1.0);
+  }
+  if (debugMode == LIGHT_DEBUG_ACTIVE_SHADOW) {
+    return vec4<f32>(vec3<f32>(activeVisibility), 1.0);
   }
 
   let finalColor = toneMap((baseColor * (ambient + diffuseSum) + specularSum * 0.45) * exposure);
