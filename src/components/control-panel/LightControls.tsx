@@ -32,6 +32,7 @@ type Props = Pick<
 > & {
   lang: Lang;
   strings: ControlPanelStrings;
+  diagnosticsPlacement?: 'inline' | 'hidden';
 };
 
 export function LightControls({
@@ -61,7 +62,8 @@ export function LightControls({
   onSelectLight,
   onAddLight,
   onRemoveLight,
-  onRenameLight
+  onRenameLight,
+  diagnosticsPlacement = 'inline'
 }: Props) {
   return (
     <>
@@ -95,6 +97,7 @@ export function LightControls({
         spotFalloff={spotFalloff}
         shadowSlot={lightShadowSlots[activeLightIndex] ?? null}
         diagnostics={activeLightDiagnostics}
+        diagnosticsPlacement={diagnosticsPlacement}
         onLightModeChange={onLightModeChange}
         onLightIntensityChange={onLightIntensityChange}
         onLightColorChange={onLightColorChange}

@@ -3,11 +3,13 @@ import { INITIAL_PARAMS, STRINGS } from './constants';
 import { SCENE_PRESETS } from '../../engine/presets';
 import { Header } from './Header';
 import { HintsSection } from './HintsSection';
+import { LightDiagnosticsSection } from './LightSettingsSection';
 import { LightControls } from './LightControls';
 import { ObjectControls } from './ObjectControls';
+import { PerformanceMetricsSection } from './PerformanceMetricsSection';
 import { SceneControls } from './SceneControls';
 import { ShadowSettings } from './ShadowSettings';
-import { dangerButtonStyle, panelStyle } from './styles';
+import { dangerButtonStyle, panelStyle, subtleButtonStyle } from './styles';
 import type { ControlPanelProps, ShadowParams } from './types';
 
 export function ControlPanel({
@@ -26,6 +28,10 @@ export function ControlPanel({
   onLanguageChange,
   autoRotate,
   onToggleAutoRotate,
+  sharedRotationCenter,
+  onSharedRotationCenterChange,
+  performanceMetrics,
+  onResetPerformanceMetrics,
   showFloor,
   showWalls,
   floorSize,
@@ -98,6 +104,7 @@ export function ControlPanel({
   onObjectRoughnessChange
 }: ControlPanelProps) {
   const [params, setParams] = useState<ShadowParams>(INITIAL_PARAMS);
+  const [activeTab, setActiveTab] = useState<'scene' | 'debug'>('scene');
   const [modelName, setModelName] = useState<string | null>(null);
   const modelInputRef = useRef<HTMLInputElement | null>(null);
   const objectTextureInputRef = useRef<HTMLInputElement | null>(null);
@@ -127,6 +134,7 @@ export function ControlPanel({
     onObjectMoveSpeedChange(1.0);
     onLightIntensityChange(1.0);
     onShowLightBeamChange(true);
+    onSharedRotationCenterChange(false);
 
     onResetScene?.();
     onResetModel?.();
@@ -185,46 +193,73 @@ export function ControlPanel({
     >
       <Header
         autoRotate={autoRotate}
+        sharedRotationCenter={sharedRotationCenter}
         lang={lang}
         method={params.method}
         strings={strings}
         onLanguageChange={onLanguageChange}
         onToggleAutoRotate={onToggleAutoRotate}
+        onSharedRotationCenterChange={onSharedRotationCenterChange}
       />
 
-      <ShadowSettings params={params} strings={strings} onUpdate={updateParams} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+        {(['scene', 'debug'] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            style={{
+              ...subtleButtonStyle,
+              padding: '6px 8px',
+              fontSize: 13,
+              fontWeight: 700,
+              background: activeTab === tab ? '#3b5bdb' : subtleButtonStyle.background,
+              borderColor: activeTab === tab ? '#6aa8ff' : subtleButtonStyle.borderColor
+            }}
+          >
+            {tab === 'scene'
+              ? lang === 'ru' ? 'Сцена' : 'Scene'
+              : lang === 'ru' ? 'Дебаг' : 'Debug'}
+          </button>
+        ))}
+      </div>
 
-      <LightControls
-        lang={lang}
-        strings={strings}
-        lightMode={lightMode}
-        onLightModeChange={onLightModeChange}
-        lightIntensity={lightIntensity}
-        onLightIntensityChange={onLightIntensityChange}
-        showLightBeam={showLightBeam}
-        onShowLightBeamChange={onShowLightBeamChange}
-        lightColor={lightColor}
-        onLightColorChange={onLightColorChange}
-        spotInnerConeDeg={spotInnerConeDeg}
-        onSpotInnerConeDegChange={onSpotInnerConeDegChange}
-        spotOuterConeDeg={spotOuterConeDeg}
-        onSpotOuterConeDegChange={onSpotOuterConeDegChange}
-        spotRange={spotRange}
-        onSpotRangeChange={onSpotRangeChange}
-        spotFalloff={spotFalloff}
-        onSpotFalloffChange={onSpotFalloffChange}
-        lightCount={lightCount}
-        activeLightIndex={activeLightIndex}
-        lightNames={lightNames}
-        lightShadowSlots={lightShadowSlots}
-        activeLightDiagnostics={activeLightDiagnostics}
-        onSelectLight={onSelectLight}
-        onAddLight={onAddLight}
-        onRemoveLight={onRemoveLight}
-        onRenameLight={onRenameLight}
-      />
+      {activeTab === 'scene' ? (
+        <>
+          <ShadowSettings params={params} strings={strings} onUpdate={updateParams} mode="scene" />
 
-      <ObjectControls
+          <LightControls
+            lang={lang}
+            strings={strings}
+            lightMode={lightMode}
+            onLightModeChange={onLightModeChange}
+            lightIntensity={lightIntensity}
+            onLightIntensityChange={onLightIntensityChange}
+            showLightBeam={showLightBeam}
+            onShowLightBeamChange={onShowLightBeamChange}
+            lightColor={lightColor}
+            onLightColorChange={onLightColorChange}
+            spotInnerConeDeg={spotInnerConeDeg}
+            onSpotInnerConeDegChange={onSpotInnerConeDegChange}
+            spotOuterConeDeg={spotOuterConeDeg}
+            onSpotOuterConeDegChange={onSpotOuterConeDegChange}
+            spotRange={spotRange}
+            onSpotRangeChange={onSpotRangeChange}
+            spotFalloff={spotFalloff}
+            onSpotFalloffChange={onSpotFalloffChange}
+            lightCount={lightCount}
+            activeLightIndex={activeLightIndex}
+            lightNames={lightNames}
+            lightShadowSlots={lightShadowSlots}
+            activeLightDiagnostics={activeLightDiagnostics}
+            onSelectLight={onSelectLight}
+            onAddLight={onAddLight}
+            onRemoveLight={onRemoveLight}
+            onRenameLight={onRenameLight}
+            diagnosticsPlacement="hidden"
+          />
+
+          <ObjectControls
         lang={lang}
         strings={strings}
         objectCount={objectCount}
@@ -255,9 +290,9 @@ export function ControlPanel({
         onObjectRoughnessChange={onObjectRoughnessChange}
         objectMoveSpeed={objectMoveSpeed}
         onObjectMoveSpeedChange={onObjectMoveSpeedChange}
-      />
+          />
 
-      <SceneControls
+          <SceneControls
         lang={lang}
         strings={strings}
         showFloor={showFloor}
@@ -291,7 +326,23 @@ export function ControlPanel({
         onExportScreenshot={onExportScreenshot}
         onRunBenchmark={onRunBenchmark}
         isBenchmarkRunning={isBenchmarkRunning}
-      />
+          />
+        </>
+      ) : (
+        <>
+          <ShadowSettings params={params} strings={strings} onUpdate={updateParams} mode="debug" />
+          <LightDiagnosticsSection
+            lang={lang}
+            diagnostics={activeLightDiagnostics}
+          />
+          <PerformanceMetricsSection
+            lang={lang}
+            strings={strings}
+            metrics={performanceMetrics}
+            onReset={onResetPerformanceMetrics}
+          />
+        </>
+      )}
 
       <button
         type="button"

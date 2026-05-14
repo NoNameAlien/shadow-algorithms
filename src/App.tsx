@@ -265,8 +265,6 @@ export default function App() {
         canvasRef={canvasRef}
         error={error}
         lang={panelProps.lang}
-        performanceMetrics={performanceMetrics}
-        onResetPerformanceMetrics={resetPerformanceMetrics}
         shadowDebugMode={shadowParams.debugShadowMap ?? 'off'}
         shadowMethod={shadowParams.method}
         benchmarkOverlay={benchmarkOverlay}
@@ -281,6 +279,8 @@ export default function App() {
         onExportScreenshot={handleExportScreenshot}
         onRunBenchmark={handleRunBenchmark}
         isBenchmarkRunning={isBenchmarkRunning}
+        performanceMetrics={performanceMetrics}
+        onResetPerformanceMetrics={resetPerformanceMetrics}
       />
     </div>
   );

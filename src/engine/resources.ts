@@ -23,6 +23,9 @@ export type VSMResources = {
   vsmMomentsTex: GPUTexture;
   vsmMomentsView: GPUTextureView;
   vsmMomentsLayerViews: GPUTextureView[];
+  vsmTempTex: GPUTexture;
+  vsmTempView: GPUTextureView;
+  vsmTempLayerViews: GPUTextureView[];
   vsmBlurTex: GPUTexture;
   vsmBlurView: GPUTextureView;
   vsmBlurLayerViews: GPUTextureView[];
@@ -110,9 +113,10 @@ export function createVSMResources(
   device: GPUDevice,
   shadowSize: number,
   layerCount: number,
-  previous?: Partial<Pick<VSMResources, 'vsmMomentsTex' | 'vsmBlurTex'>>
+  previous?: Partial<Pick<VSMResources, 'vsmMomentsTex' | 'vsmTempTex' | 'vsmBlurTex'>>
 ): VSMResources {
   previous?.vsmMomentsTex?.destroy();
+  previous?.vsmTempTex?.destroy();
   previous?.vsmBlurTex?.destroy();
 
   const vsmMomentsTex = device.createTexture({
@@ -124,14 +128,25 @@ export function createVSMResources(
       GPUTextureUsage.STORAGE_BINDING
   });
 
-  const vsmBlurTex = device.createTexture({
+  const createBlurTexture = (label: string) => device.createTexture({
+    label,
     size: { width: shadowSize, height: shadowSize, depthOrArrayLayers: layerCount },
     format: 'rgba16float',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING
   });
 
+  const vsmTempTex = createBlurTexture('vsm horizontal blur texture');
+  const vsmBlurTex = createBlurTexture('vsm final blur texture');
+
   const vsmMomentsLayerViews = Array.from({ length: layerCount }, (_, index) =>
     vsmMomentsTex.createView({
+      dimension: '2d',
+      baseArrayLayer: index,
+      arrayLayerCount: 1
+    })
+  );
+  const vsmTempLayerViews = Array.from({ length: layerCount }, (_, index) =>
+    vsmTempTex.createView({
       dimension: '2d',
       baseArrayLayer: index,
       arrayLayerCount: 1
@@ -149,6 +164,9 @@ export function createVSMResources(
     vsmMomentsTex,
     vsmMomentsView: vsmMomentsTex.createView({ dimension: '2d-array' }),
     vsmMomentsLayerViews,
+    vsmTempTex,
+    vsmTempView: vsmTempTex.createView({ dimension: '2d-array' }),
+    vsmTempLayerViews,
     vsmBlurTex,
     vsmBlurView: vsmBlurTex.createView({ dimension: '2d-array' }),
     vsmBlurLayerViews,

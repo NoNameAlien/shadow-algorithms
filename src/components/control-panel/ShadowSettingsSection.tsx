@@ -9,6 +9,7 @@ type Props = {
   params: ShadowParams;
   strings: ControlPanelStrings;
   onUpdate: (partial: Partial<ShadowParams>) => void;
+  mode?: 'all' | 'scene' | 'debug';
 };
 
 const rgbToHex = (rgb: [number, number, number]) =>
@@ -29,8 +30,10 @@ const normalizeShadowDebugMode = (mode: ShadowDebugMode | undefined): ShadowDebu
   return mode ?? 'off';
 };
 
-export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
+export function ShadowSettingsSection({ params, strings, onUpdate, mode = 'all' }: Props) {
   const isRu = strings.title === 'Настройки теней';
+  const showScene = mode !== 'debug';
+  const showDebug = mode !== 'scene';
   const isPCF = params.method === 'PCF';
   const isPCSS = params.method === 'PCSS';
   const isVSM = params.method === 'VSM';
@@ -59,6 +62,8 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
 
   return (
     <>
+      {showScene && (
+      <>
       <PanelSection title={strings.methodLabel.replace(':', '')} collapsible={false}>
         <SelectControl
           label={strings.methodLabel}
@@ -194,7 +199,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
         )}
       </PanelSection>
 
-      <PanelSection title={isRu ? 'Свет, окружение и отладка' : 'Lighting, environment & debug'} defaultCollapsed>
+      <PanelSection title={isRu ? 'Свет и окружение' : 'Lighting & environment'} defaultCollapsed>
         <RangeControl
           label={`${strings.shadowStrength} (×${(params.shadowStrength ?? 1.0).toFixed(2)})`}
           help={isRu ? 'Итоговая сила затемнения от теней.' : 'Final darkening strength from shadows.'}
@@ -247,23 +252,30 @@ export function ShadowSettingsSection({ params, strings, onUpdate }: Props) {
           <HelpMark text={isRu ? 'Цвет нижней полусферы фонового освещения.' : 'Color of the lower hemisphere ambient light.'} />
         </label>
 
-        <SelectControl
-          label={strings.lightDebugMode}
-          help={isRu ? 'Показывает отдельные составляющие освещения для отладки.' : 'Shows separate lighting components for debugging.'}
-          value={params.lightDebugMode ?? 'final'}
-          options={lightDebugOptions}
-          onChange={(lightDebugMode) => onUpdate({ lightDebugMode })}
-        />
-
-        <SelectControl
-          label={strings.shadowDebug}
-          help={isRu ? 'Выводит shadow map или VSM moments поверх сцены.' : 'Displays shadow map or VSM moments over the scene.'}
-          value={debugShadowMap}
-          options={shadowDebugOptions}
-          onChange={(debugShadowMap) => onUpdate({ debugShadowMap })}
-          marginBottom={0}
-        />
       </PanelSection>
+      </>
+      )}
+
+      {showDebug && (
+        <PanelSection title={isRu ? 'Визуальная отладка' : 'Visual debug'} collapsible={false}>
+          <SelectControl
+            label={strings.lightDebugMode}
+            help={isRu ? 'Показывает отдельные составляющие освещения для отладки.' : 'Shows separate lighting components for debugging.'}
+            value={params.lightDebugMode ?? 'final'}
+            options={lightDebugOptions}
+            onChange={(lightDebugMode) => onUpdate({ lightDebugMode })}
+          />
+
+          <SelectControl
+            label={strings.shadowDebug}
+            help={isRu ? 'Выводит shadow map или VSM moments поверх сцены.' : 'Displays shadow map or VSM moments over the scene.'}
+            value={debugShadowMap}
+            options={shadowDebugOptions}
+            onChange={(debugShadowMap) => onUpdate({ debugShadowMap })}
+            marginBottom={0}
+          />
+        </PanelSection>
+      )}
     </>
   );
 }

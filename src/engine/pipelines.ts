@@ -7,6 +7,7 @@ export type RendererPipelines = {
   pipelineVSM: GPURenderPipeline;
   vsmMomentsPipeline: GPURenderPipeline;
   blurHorizontalPipeline: GPUComputePipeline;
+  blurVerticalPipeline: GPUComputePipeline;
   shadowPipeline: GPURenderPipeline;
   gridPipeline: GPURenderPipeline;
   lightBeamPipeline: GPURenderPipeline;
@@ -90,6 +91,10 @@ export function createRendererPipelines(device: GPUDevice, format: GPUTextureFor
   const blurHorizontalPipeline = device.createComputePipeline({
     layout: 'auto',
     compute: { module: blurModule, entryPoint: 'cs_horizontal' }
+  });
+  const blurVerticalPipeline = device.createComputePipeline({
+    layout: 'auto',
+    compute: { module: blurModule, entryPoint: 'cs_vertical' }
   });
   console.log('✓ Blur pipeline created');
 
@@ -184,6 +189,7 @@ export function createRendererPipelines(device: GPUDevice, format: GPUTextureFor
     pipelineVSM,
     vsmMomentsPipeline,
     blurHorizontalPipeline,
+    blurVerticalPipeline,
     shadowPipeline,
     gridPipeline,
     lightBeamPipeline,

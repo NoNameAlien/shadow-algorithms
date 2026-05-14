@@ -74,6 +74,7 @@ export class Renderer {
   private pipelineVSM!: GPURenderPipeline;
   private vsmMomentsPipeline!: GPURenderPipeline;
   private blurHorizontalPipeline!: GPUComputePipeline;
+  private blurVerticalPipeline!: GPUComputePipeline;
   private shadowPipeline!: GPURenderPipeline;
   private debugShadowDepthPipeline!: GPURenderPipeline;
   private debugVsmPipeline!: GPURenderPipeline;
@@ -108,6 +109,7 @@ export class Renderer {
   private dragStartMouseX = 0;
   private dragStartMouseY = 0;
   private objectAutoRotate = true;
+  private sharedRotationCenter = false;
 
   // Ориентация прожектора (spot) вокруг своей позиции
   private spotYaw = 0; // вокруг Y
@@ -129,7 +131,7 @@ export class Renderer {
   private uniformBuf!: GPUBuffer;
   private axisUniformBuf!: GPUBuffer;
   private bindGroup1Main!: GPUBindGroup;
-  private vsmBlurBindGroup0!: GPUBindGroup; // input -> output
+  private vsmBlurBindGroups!: { horizontal: GPUBindGroup; vertical: GPUBindGroup };
   private debugShadowBindGroups: GPUBindGroup[] = [];
   private debugVsmBindGroups: GPUBindGroup[] = [];
 
@@ -263,6 +265,8 @@ export class Renderer {
   private tempLightProj = mat4.create();
   private tempLightViewProjs = Array.from({ length: MAX_SHADOW_SLOTS }, () => mat4.create());
   private tempAxisModel = mat4.create();
+  private tempSharedRotationCenter = vec3.create();
+  private tempActiveRotationOffset = vec3.create();
   private tempLightDirNorm = vec3.create();
   private tempLightUp = vec3.fromValues(0, 1, 0);
   private tempLightBeamDir = vec3.create();
@@ -672,12 +676,20 @@ export class Renderer {
     this.objectAutoRotate = enabled;
   }
 
+  setSharedRotationCenter(enabled: boolean) {
+    this.sharedRotationCenter = enabled;
+  }
+
   setDeviceLostHandler(handler: DeviceLostHandler | null) {
     this.deviceLostHandler = handler;
   }
 
   getObjectAutoRotate() {
     return this.objectAutoRotate;
+  }
+
+  getSharedRotationCenter() {
+    return this.sharedRotationCenter;
   }
 
   setBenchmarkOrbitView(theta: number, phi: number, distance: number) {
@@ -1608,6 +1620,7 @@ export class Renderer {
     this.pipelineVSM = pipelines.pipelineVSM;
     this.vsmMomentsPipeline = pipelines.vsmMomentsPipeline;
     this.blurHorizontalPipeline = pipelines.blurHorizontalPipeline;
+    this.blurVerticalPipeline = pipelines.blurVerticalPipeline;
     this.shadowPipeline = pipelines.shadowPipeline;
     this.gridPipeline = pipelines.gridPipeline;
     this.lightBeamPipeline = pipelines.lightBeamPipeline;
@@ -1763,9 +1776,10 @@ export class Renderer {
       });
     }
 
-    this.vsmBlurBindGroup0 = this.shadowRenderer.createVsmBlurBindGroup(
+    this.vsmBlurBindGroups = this.shadowRenderer.createVsmBlurBindGroups(
       device,
       this.blurHorizontalPipeline,
+      this.blurVerticalPipeline,
     );
     this.debugShadowBindGroups = this.shadowRenderer.createDebugShadowBindGroups(
       device,
@@ -2252,6 +2266,17 @@ export class Renderer {
     console.log("✓ Renderer destroyed");
   }
 
+  private getObjectsRotationCenter(out: vec3): vec3 | null {
+    if (this.objects.length === 0) return null;
+
+    vec3.set(out, 0, 0, 0);
+    for (const object of this.objects) {
+      vec3.add(out, out, object.pos);
+    }
+    vec3.scale(out, out, 1 / this.objects.length);
+    return out;
+  }
+
   private frame() {
     if (this.deviceLost) return;
     const { device, context } = this.gpu;
@@ -2384,10 +2409,20 @@ export class Renderer {
     const arcballDelta =
       this.isDraggingObject || !this.objectAutoRotate ? 0 : deltaTime;
     const rotation = this.arcball.update(arcballDelta);
+    const rotationCenter = this.sharedRotationCenter
+      ? this.getObjectsRotationCenter(this.tempSharedRotationCenter)
+      : null;
 
     // Собираем модельную матрицу = Translation(objectPos) * Rotation
-    mat4.fromTranslation(this.model, this.objectPos);
-    mat4.multiply(this.model, this.model, rotation);
+    if (rotationCenter) {
+      vec3.subtract(this.tempActiveRotationOffset, this.objectPos, rotationCenter);
+      mat4.fromTranslation(this.model, rotationCenter);
+      mat4.multiply(this.model, this.model, rotation);
+      mat4.translate(this.model, this.model, this.tempActiveRotationOffset);
+    } else {
+      mat4.fromTranslation(this.model, this.objectPos);
+      mat4.multiply(this.model, this.model, rotation);
+    }
 
     const lightPos = this.lightDir;
 
@@ -2523,6 +2558,7 @@ export class Renderer {
         ? this.writeVsmShadowSlotParams(shadowSlots, shadowParamsUniform)
         : undefined,
       rotation,
+      sharedRotationCenter: rotationCenter,
       maxShadowSlots: MAX_SHADOW_SLOTS,
     });
 
@@ -2536,7 +2572,8 @@ export class Renderer {
         slots: shadowSlots,
         vsmMomentsPipeline: this.vsmMomentsPipeline,
         blurHorizontalPipeline: this.blurHorizontalPipeline,
-        vsmBlurBindGroup: this.vsmBlurBindGroup0,
+        blurVerticalPipeline: this.blurVerticalPipeline,
+        vsmBlurBindGroups: this.vsmBlurBindGroups,
         shadowSize: this.shadowSize,
         layerCount: MAX_SHADOW_SLOTS,
         debugShadowSlotIndex,

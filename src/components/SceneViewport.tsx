@@ -1,8 +1,6 @@
 import type { RefObject } from 'react';
 import type { LightMode, ShadowDebugMode, ShadowMethod } from '../engine/Renderer';
-import { PerformanceMetricsSection } from './control-panel/PerformanceMetricsSection';
-import { STRINGS } from './control-panel/constants';
-import type { Lang, PerformanceMetrics } from './control-panel/types';
+import type { Lang } from './control-panel/types';
 import sunIcon from '../image/light/sun.png';
 import spotIcon from '../image/light/spot.png';
 import topIcon from '../image/light/top.png';
@@ -20,8 +18,6 @@ type Props = {
   lightsScreen: LightScreenPosition[];
   error: string | null;
   lang: Lang;
-  performanceMetrics: PerformanceMetrics;
-  onResetPerformanceMetrics: () => void;
   shadowDebugMode: ShadowDebugMode;
   shadowMethod: ShadowMethod;
   benchmarkOverlay?: string | null;
@@ -50,28 +46,15 @@ export function SceneViewport({
   lightsScreen,
   error,
   lang,
-  performanceMetrics,
-  onResetPerformanceMetrics,
   shadowDebugMode,
   shadowMethod,
   benchmarkOverlay
 }: Props) {
-  const strings = STRINGS[lang];
   const debugLabel = shadowDebugSlotLabel(shadowDebugMode, shadowMethod);
 
   return (
     <div style={{ position: 'relative', flex: 1 }}>
       <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
-
-      <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 2 }}>
-        <PerformanceMetricsSection
-          lang={lang}
-          strings={strings}
-          metrics={performanceMetrics}
-          floating
-          onReset={onResetPerformanceMetrics}
-        />
-      </div>
 
       {shadowDebugMode !== 'off' && (
         <div

@@ -18,6 +18,9 @@ export class ShadowRenderer {
   vsmMomentsTex!: GPUTexture;
   vsmMomentsView!: GPUTextureView;
   vsmMomentsLayerViews: GPUTextureView[] = [];
+  vsmTempTex!: GPUTexture;
+  vsmTempView!: GPUTextureView;
+  vsmTempLayerViews: GPUTextureView[] = [];
   vsmBlurTex!: GPUTexture;
   vsmBlurView!: GPUTextureView;
   vsmBlurLayerViews: GPUTextureView[] = [];
@@ -52,26 +55,46 @@ export class ShadowRenderer {
   createVSMResources(device: GPUDevice, shadowSize: number, layerCount: number): void {
     const resources = createVSMResourceSet(device, shadowSize, layerCount, {
       vsmMomentsTex: this.vsmMomentsTex,
+      vsmTempTex: this.vsmTempTex,
       vsmBlurTex: this.vsmBlurTex,
     });
 
     this.vsmMomentsTex = resources.vsmMomentsTex;
     this.vsmMomentsView = resources.vsmMomentsView;
     this.vsmMomentsLayerViews = resources.vsmMomentsLayerViews;
+    this.vsmTempTex = resources.vsmTempTex;
+    this.vsmTempView = resources.vsmTempView;
+    this.vsmTempLayerViews = resources.vsmTempLayerViews;
     this.vsmBlurTex = resources.vsmBlurTex;
     this.vsmBlurView = resources.vsmBlurView;
     this.vsmBlurLayerViews = resources.vsmBlurLayerViews;
     this.vsmSampler = resources.vsmSampler;
   }
 
-  createVsmBlurBindGroup(device: GPUDevice, pipeline: GPUComputePipeline): GPUBindGroup {
-    return device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: this.vsmMomentsView },
-        { binding: 1, resource: this.vsmBlurView },
-      ],
-    });
+  createVsmBlurBindGroups(
+    device: GPUDevice,
+    horizontalPipeline: GPUComputePipeline,
+    verticalPipeline: GPUComputePipeline,
+  ): {
+    horizontal: GPUBindGroup;
+    vertical: GPUBindGroup;
+  } {
+    return {
+      horizontal: device.createBindGroup({
+        layout: horizontalPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: this.vsmMomentsView },
+          { binding: 1, resource: this.vsmTempView },
+        ],
+      }),
+      vertical: device.createBindGroup({
+        layout: verticalPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: this.vsmTempView },
+          { binding: 1, resource: this.vsmBlurView },
+        ],
+      }),
+    };
   }
 
   createDebugShadowBindGroups(
@@ -150,7 +173,8 @@ export class ShadowRenderer {
     slots: ShadowSlot[];
     vsmMomentsPipeline: GPURenderPipeline;
     blurHorizontalPipeline: GPUComputePipeline;
-    vsmBlurBindGroup: GPUBindGroup;
+    blurVerticalPipeline: GPUComputePipeline;
+    vsmBlurBindGroups: { horizontal: GPUBindGroup; vertical: GPUBindGroup };
     shadowSize: number;
     layerCount: number;
     debugShadowSlotIndex: number | null;
@@ -185,11 +209,17 @@ export class ShadowRenderer {
 
     const blurH = params.encoder.beginComputePass();
     blurH.setPipeline(params.blurHorizontalPipeline);
-    blurH.setBindGroup(0, params.vsmBlurBindGroup);
+    blurH.setBindGroup(0, params.vsmBlurBindGroups.horizontal);
     const workgroupsX = Math.ceil(params.shadowSize / 8);
     const workgroupsY = Math.ceil(params.shadowSize / 8);
     blurH.dispatchWorkgroups(workgroupsX, workgroupsY, params.layerCount);
     blurH.end();
+
+    const blurV = params.encoder.beginComputePass();
+    blurV.setPipeline(params.blurVerticalPipeline);
+    blurV.setBindGroup(0, params.vsmBlurBindGroups.vertical);
+    blurV.dispatchWorkgroups(workgroupsX, workgroupsY, params.layerCount);
+    blurV.end();
   }
 
   private clearInactiveDepthDebugSlot(
@@ -277,12 +307,14 @@ export class ShadowRenderer {
       texture.destroy();
     }
     this.vsmMomentsTex?.destroy();
+    this.vsmTempTex?.destroy();
     this.vsmBlurTex?.destroy();
 
     this.shadowDebugTextures = [];
     this.shadowDebugViews = [];
     this.shadowLayerViews = [];
     this.vsmMomentsLayerViews = [];
+    this.vsmTempLayerViews = [];
     this.vsmBlurLayerViews = [];
   }
 }

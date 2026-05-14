@@ -18,6 +18,7 @@ type Props = {
   spotFalloff: number;
   shadowSlot: number | null;
   diagnostics: LightDiagnostics;
+  diagnosticsPlacement?: 'inline' | 'hidden';
   onLightModeChange: (mode: LightMode) => void;
   onLightIntensityChange: (value: number) => void;
   onLightColorChange: (hex: string) => void;
@@ -41,6 +42,7 @@ export function LightSettingsSection({
   spotFalloff,
   shadowSlot,
   diagnostics,
+  diagnosticsPlacement = 'inline',
   onLightModeChange,
   onLightIntensityChange,
   onLightColorChange,
@@ -51,19 +53,6 @@ export function LightSettingsSection({
   onSpotFalloffChange
 }: Props) {
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
-  const formatNumber = (value: number | null, digits = 2) => value === null ? '-' : value.toFixed(digits);
-  const diagnosticRows = [
-    [lang === 'ru' ? 'Слот' : 'Slot', diagnostics.shadowSlot === null ? '-' : `S${diagnostics.shadowSlot}`],
-    [lang === 'ru' ? 'Кидает тень' : 'Casts shadow', diagnostics.castsShadow ? (lang === 'ru' ? 'да' : 'yes') : (lang === 'ru' ? 'нет' : 'no')],
-    [lang === 'ru' ? 'Проекция' : 'Projection', diagnostics.shadowProjection],
-    [lang === 'ru' ? 'Shadow far' : 'Shadow far', formatNumber(diagnostics.shadowFar, 1)],
-    [lang === 'ru' ? 'Эфф. bias' : 'Effective bias', diagnostics.effectiveBias.toExponential(2)],
-    [lang === 'ru' ? 'Конус' : 'Cone', diagnostics.cone ? `${diagnostics.cone[0].toFixed(0)}° / ${diagnostics.cone[1].toFixed(0)}°` : '-'],
-    [lang === 'ru' ? 'Дальность' : 'Range', formatNumber(diagnostics.range, 1)],
-    [lang === 'ru' ? 'Затухание' : 'Falloff', formatNumber(diagnostics.falloff, 2)],
-    [lang === 'ru' ? 'Ortho size' : 'Ortho size', formatNumber(diagnostics.shadowOrthoSize, 1)]
-  ];
 
   return (
     <PanelSection title={lang === 'ru' ? 'Параметры света' : 'Light params'} collapsible={false}>
@@ -216,7 +205,37 @@ export function LightSettingsSection({
         ) : null}
       </div>
 
-      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #2a303c' }}>
+      {diagnosticsPlacement === 'inline' ? <LightDiagnosticsSection lang={lang} diagnostics={diagnostics} collapsible /> : null}
+    </PanelSection>
+  );
+}
+
+export function LightDiagnosticsSection({
+  lang,
+  diagnostics,
+  collapsible = false
+}: {
+  lang: Lang;
+  diagnostics: LightDiagnostics;
+  collapsible?: boolean;
+}) {
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(!collapsible);
+  const formatNumber = (value: number | null, digits = 2) => value === null ? '-' : value.toFixed(digits);
+  const diagnosticRows = [
+    [lang === 'ru' ? 'Слот' : 'Slot', diagnostics.shadowSlot === null ? '-' : `S${diagnostics.shadowSlot}`],
+    [lang === 'ru' ? 'Кидает тень' : 'Casts shadow', diagnostics.castsShadow ? (lang === 'ru' ? 'да' : 'yes') : (lang === 'ru' ? 'нет' : 'no')],
+    [lang === 'ru' ? 'Проекция' : 'Projection', diagnostics.shadowProjection],
+    [lang === 'ru' ? 'Дальняя плоскость' : 'Shadow far', formatNumber(diagnostics.shadowFar, 1)],
+    [lang === 'ru' ? 'Эффективный bias' : 'Effective bias', diagnostics.effectiveBias.toExponential(2)],
+    [lang === 'ru' ? 'Конус' : 'Cone', diagnostics.cone ? `${diagnostics.cone[0].toFixed(0)}° / ${diagnostics.cone[1].toFixed(0)}°` : '-'],
+    [lang === 'ru' ? 'Дальность' : 'Range', formatNumber(diagnostics.range, 1)],
+    [lang === 'ru' ? 'Затухание' : 'Falloff', formatNumber(diagnostics.falloff, 2)],
+    [lang === 'ru' ? 'Размер ортопроекции' : 'Ortho size', formatNumber(diagnostics.shadowOrthoSize, 1)]
+  ];
+
+  return (
+    <PanelSection title={lang === 'ru' ? 'Диагностика теней' : 'Shadow diagnostics'} collapsible={false}>
+      {collapsible ? (
         <button
           type="button"
           onClick={() => setDiagnosticsOpen((previous) => !previous)}
@@ -234,30 +253,30 @@ export function LightSettingsSection({
             fontWeight: 600
           }}
         >
-          <span>{lang === 'ru' ? 'Диагностика теней' : 'Shadow diagnostics'}</span>
+          <span>{lang === 'ru' ? 'Параметры shadow pass' : 'Shadow pass values'}</span>
           <span>{diagnosticsOpen ? '▴' : '▾'}</span>
         </button>
+      ) : null}
 
-        {diagnosticsOpen ? (
-          <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
-            {diagnosticRows.map(([label, value]) => (
-              <div
-                key={label}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'minmax(0, 1fr) auto',
-                  gap: 8,
-                  fontSize: 12,
-                  color: '#cfd6e4'
-                }}
-              >
-                <span style={{ opacity: 0.72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-                <span style={{ fontVariantNumeric: 'tabular-nums', color: '#e6e6e6' }}>{value}</span>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      {diagnosticsOpen ? (
+        <div style={{ marginTop: collapsible ? 8 : 0, display: 'grid', gap: 4 }}>
+          {diagnosticRows.map(([label, value]) => (
+            <div
+              key={label}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 1fr) auto',
+                gap: 8,
+                fontSize: 12,
+                color: '#cfd6e4'
+              }}
+            >
+              <span style={{ opacity: 0.72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', color: '#e6e6e6' }}>{value}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </PanelSection>
   );
 }

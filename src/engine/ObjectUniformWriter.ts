@@ -1,4 +1,4 @@
-import { mat4 } from "gl-matrix";
+import { mat4, vec3 } from "gl-matrix";
 import type { ObjectDrawStateRegistry } from "./ObjectDrawStateRegistry";
 import type { SceneObject } from "./types";
 
@@ -11,6 +11,7 @@ export type ObjectUniformWriteContext = {
   shadowParamsUniform: Float32Array;
   shadowSlotParamsUniforms?: Float32Array[];
   rotation: mat4;
+  sharedRotationCenter?: vec3 | null;
   maxShadowSlots: number;
 };
 
@@ -18,6 +19,7 @@ export class ObjectUniformWriter {
   private uniformData = new Float32Array(60);
   private objectParams = new Float32Array(8);
   private model = mat4.create();
+  private localOffset = vec3.create();
 
   writeObjects(
     device: GPUDevice,
@@ -28,7 +30,7 @@ export class ObjectUniformWriter {
     for (let i = 0; i < objects.length; i++) {
       const obj = objects[i];
       const state = drawStates.get(i);
-      this.writeObjectModelMatrix(this.model, obj, context.rotation);
+      this.writeObjectModelMatrix(this.model, obj, context.rotation, context.sharedRotationCenter);
 
       this.fillObjectUniformData(
         this.uniformData,
@@ -61,9 +63,21 @@ export class ObjectUniformWriter {
     }
   }
 
-  private writeObjectModelMatrix(out: mat4, obj: SceneObject, rotation: mat4): void {
-    mat4.fromTranslation(out, obj.pos);
-    mat4.multiply(out, out, rotation);
+  private writeObjectModelMatrix(
+    out: mat4,
+    obj: SceneObject,
+    rotation: mat4,
+    sharedRotationCenter?: vec3 | null,
+  ): void {
+    if (sharedRotationCenter) {
+      vec3.subtract(this.localOffset, obj.pos, sharedRotationCenter);
+      mat4.fromTranslation(out, sharedRotationCenter);
+      mat4.multiply(out, out, rotation);
+      mat4.translate(out, out, this.localOffset);
+    } else {
+      mat4.fromTranslation(out, obj.pos);
+      mat4.multiply(out, out, rotation);
+    }
     mat4.scale(out, out, obj.scale);
   }
 

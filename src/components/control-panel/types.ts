@@ -72,6 +72,10 @@ export type ControlPanelProps = {
   onLanguageChange: (lang: Lang) => void;
   autoRotate: boolean;
   onToggleAutoRotate: () => void;
+  sharedRotationCenter: boolean;
+  onSharedRotationCenterChange: (value: boolean) => void;
+  performanceMetrics?: PerformanceMetrics;
+  onResetPerformanceMetrics?: () => void;
   showFloor: boolean;
   showWalls: boolean;
   floorSize: number;

@@ -237,8 +237,8 @@ export function ObjectParamsSection({
         />
 
         <RangeControl
-          label={lang === 'ru' ? `Shininess: ${objectShininess.toFixed(0)}` : `Legacy shininess: ${objectShininess.toFixed(0)}`}
-          help={lang === 'ru' ? 'Совместимый параметр резкости блика для старой модели освещения.' : 'Compatibility highlight sharpness value for the legacy lighting model.'}
+          label={lang === 'ru' ? `Резкость блика: ${objectShininess.toFixed(0)}` : `Highlight sharpness: ${objectShininess.toFixed(0)}`}
+          help={lang === 'ru' ? 'Чем выше значение, тем уже и резче зеркальный блик. Это параметр Shininess в модели Блинна-Фонга.' : 'Higher values make the specular highlight narrower and sharper. This is the Blinn-Phong shininess parameter.'}
           min={4}
           max={128}
           step={1}

@@ -141,6 +141,7 @@ const syncState = <T,>(setter: (updater: (previous: T) => T) => void, next: T, s
 export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
   const [lang, setLang] = useState<Lang>('ru');
   const [autoRotate, setAutoRotate] = useState(true);
+  const [sharedRotationCenter, setSharedRotationCenter] = useState(false);
   const [objectMoveSpeed, setObjectMoveSpeed] = useState(1.0);
   const [showLightBeam, setShowLightBeam] = useState(true);
   const [showFloor, setShowFloor] = useState(true);
@@ -284,6 +285,11 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       rendererRef.current?.setObjectAutoRotate(next);
       return next;
     });
+  };
+
+  const handleSharedRotationCenterChange = (value: boolean) => {
+    setSharedRotationCenter(value);
+    runRendererCommand((renderer) => renderer.setSharedRotationCenter(value));
   };
 
   const handleObjectMoveSpeedChange = (value: number) => {
@@ -473,6 +479,8 @@ export const useSceneController = (rendererRef: RefObject<Renderer | null>) => {
       onLanguageChange: setLang,
       autoRotate,
       onToggleAutoRotate: handleToggleAutoRotate,
+      sharedRotationCenter,
+      onSharedRotationCenterChange: handleSharedRotationCenterChange,
       showFloor,
       showWalls,
       floorSize,
