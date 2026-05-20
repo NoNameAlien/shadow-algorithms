@@ -15,7 +15,7 @@ import {
 } from './utils/reportExport';
 import type { ShadowMethod } from './engine/types';
 import { SCENE_PRESETS, type ScenePresetId } from './engine/presets';
-import { getShadowMethodNotes, getShadowQualityLabel } from './utils/shadowQuality';
+import { getAvailableShadowQualityPresets, getShadowMethodNotes, getShadowQualityLabel } from './utils/shadowQuality';
 
 const BENCHMARK_PRESETS: ScenePresetId[] = [
   'aliasingTest',
@@ -32,6 +32,16 @@ const BENCHMARK_CAMERA: Record<ScenePresetId, { startTheta: number; arc: number;
   penumbraTest: { startTheta: Math.PI * 0.2, arc: Math.PI * 0.3, phi: Math.PI * 0.34, distance: 9.5 },
   multiLightTest: { startTheta: -Math.PI * 0.72, arc: Math.PI * 0.25, phi: Math.PI * 0.36, distance: 9.2 },
   vsmBleedingTest: { startTheta: Math.PI * 0.34, arc: Math.PI * 0.34, phi: Math.PI * 0.36, distance: 13.2 }
+};
+
+const STAIRS_FOCUS_ID = 'stairsFocus';
+const STAIRS_FOCUS_LABEL = 'Stairs close-up';
+const STAIRS_FOCUS_CAMERA = {
+  startTheta: Math.PI * 0.88,
+  arc: -Math.PI * 0.015,
+  phi: Math.PI * 0.4,
+  distance: 2.05,
+  target: [1.05, 0.25, -0.78] as [number, number, number]
 };
 
 export default function App() {
@@ -137,8 +147,102 @@ export default function App() {
   const createBenchmarkOverlayLabel = (sceneLabel: string, params: ShadowParams) =>
     `${sceneLabel} | ${params.method} | ${getShadowQualityLabel(params, 'en')} | ${params.shadowMapSize}px | ${getShadowMethodNotes(params)}`;
 
+  const getBenchmarkQualitySweep = (method: ShadowMethod) => {
+    const presets = getAvailableShadowQualityPresets(method);
+    const first = presets[0];
+    const last = presets[presets.length - 1];
+    return first && last && first.id !== last.id ? [first, last] : presets;
+  };
+
+  const tuneFocusedStairsParams = (params: ShadowParams): ShadowParams => {
+    if (params.method !== 'PCSS' || params.shadowMapSize < 4096) return params;
+
+    return {
+      ...params,
+      pcssLightSize: 0.22,
+      pcssBlockerSearchSamples: 32
+    };
+  };
+
+  const createFocusedStairsScene = () => {
+    const renderer = rendererRef.current;
+    if (!renderer) return null;
+
+    renderer.applyScenePreset('stairs');
+    const scene = renderer.exportScene();
+    scene.showWalls = false;
+    scene.showGrid = false;
+    scene.floorSize = 18;
+    scene.floorColor = [0.97, 0.97, 0.94];
+    scene.wallColor = [0.97, 0.97, 0.94];
+    scene.objects = scene.objects.map((object, index) => ({
+      ...object,
+      color: [
+        0.58 + Math.min(index, 7) * 0.025,
+        0.39 + Math.min(index, 7) * 0.018,
+        0.24 + Math.min(index, 7) * 0.012
+      ] as [number, number, number],
+      roughness: 0.84,
+      specular: 0.12
+    }));
+    scene.objects.push({
+      name: 'Sphere on top step',
+      pos: [3.2, 0.9, -0.28],
+      scale: [0.32, 0.32, 0.32],
+      moveSpeed: 0,
+      meshId: 2,
+      color: [0.72, 0.5, 0.32],
+      castShadows: true,
+      receiveShadows: true,
+      selfShadows: true,
+      specular: 0.16,
+      shininess: 28,
+      roughness: 0.78
+    });
+
+    scene.lights = scene.lights.map((light, index) => {
+      if (index === 0) {
+        return {
+          ...light,
+          name: 'Low directional stair light',
+          pos: [-8.5, 2.75, 6.2],
+          type: 'sun',
+          yaw: 2.38,
+          pitch: -0.22,
+          intensity: 3.55,
+          color: [1.0, 0.97, 0.9],
+          innerConeDeg: 16,
+          outerConeDeg: 46,
+          range: 28,
+          falloff: 1.05,
+          castShadows: true
+        };
+      }
+
+      return {
+        ...light,
+        intensity: 0.38,
+        color: [0.82, 0.88, 1.0],
+        castShadows: false
+      };
+    });
+
+    scene.shadowParams = {
+      ...scene.shadowParams,
+      shadowStrength: 1.42,
+      ambientStrength: 0.14,
+      exposure: 1.1,
+      hemisphereSkyColor: [0.74, 0.78, 0.86],
+      hemisphereGroundColor: [0.18, 0.18, 0.16],
+      lightDebugMode: 'final',
+      debugShadowMap: 'off'
+    };
+
+    return scene;
+  };
+
   const runSmoothBenchmarkOrbit = async (
-    config: { startTheta: number; arc: number; phi: number; distance: number },
+    config: { startTheta: number; arc: number; phi: number; distance: number; target?: [number, number, number] },
     durationMs: number
   ) => {
     const renderer = rendererRef.current;
@@ -153,13 +257,14 @@ export default function App() {
       renderer.setBenchmarkOrbitView(
         config.startTheta + config.arc * eased,
         config.phi,
-        config.distance
+        config.distance,
+        config.target
       );
       await waitForFrames(1);
       elapsed = performance.now() - start;
     }
 
-    renderer.setBenchmarkOrbitView(config.startTheta + config.arc, config.phi, config.distance);
+    renderer.setBenchmarkOrbitView(config.startTheta + config.arc, config.phi, config.distance, config.target);
     await waitForFrames(2);
   };
 
@@ -218,12 +323,62 @@ export default function App() {
         }
       }
 
+      const focusedStairsScene = createFocusedStairsScene();
+      if (focusedStairsScene) {
+        const focusedSampleMs = Math.round(sampleMs * 2 / 3);
+        renderer.importScene(focusedStairsScene);
+        renderer.setBenchmarkOrbitView(
+          STAIRS_FOCUS_CAMERA.startTheta,
+          STAIRS_FOCUS_CAMERA.phi,
+          STAIRS_FOCUS_CAMERA.distance,
+          STAIRS_FOCUS_CAMERA.target
+        );
+        await waitForFrames(2);
+
+        for (const method of methods) {
+          for (const quality of getBenchmarkQualitySweep(method)) {
+            const methodParams: ShadowParams = tuneFocusedStairsParams({
+              ...originalParams,
+              ...focusedStairsScene.shadowParams,
+              ...quality.params,
+              method,
+              lightDebugMode: 'final',
+              debugShadowMap: 'off'
+            });
+
+            renderer.updateShadowParams(methodParams);
+            renderer.setBenchmarkOrbitView(
+              STAIRS_FOCUS_CAMERA.startTheta,
+              STAIRS_FOCUS_CAMERA.phi,
+              STAIRS_FOCUS_CAMERA.distance,
+              STAIRS_FOCUS_CAMERA.target
+            );
+            const overlayLabel = createBenchmarkOverlayLabel(STAIRS_FOCUS_LABEL, methodParams);
+            setBenchmarkOverlay(overlayLabel);
+            await waitForFrames(4);
+            await wait(warmupMs);
+            renderer.resetPerformanceMetrics();
+            await runSmoothBenchmarkOrbit(STAIRS_FOCUS_CAMERA, focusedSampleMs);
+
+            const screenshot = await captureBenchmarkScreenshot(overlayLabel);
+            samples.push(createBenchmarkSample(
+              STAIRS_FOCUS_ID,
+              STAIRS_FOCUS_LABEL,
+              method,
+              methodParams,
+              renderer.getPerformanceMetrics(),
+              screenshot,
+            ));
+          }
+        }
+      }
+
       renderer.importScene(originalScene);
       setShadowParams(originalParams);
 
       const report = {
         timestamp: new Date().toISOString(),
-        scenePresets: BENCHMARK_PRESETS,
+        scenePresets: [...BENCHMARK_PRESETS, STAIRS_FOCUS_ID],
         warmupMs,
         sampleMs,
         orbitSteps,
@@ -265,8 +420,8 @@ export default function App() {
         canvasRef={canvasRef}
         error={error}
         lang={panelProps.lang}
-        shadowDebugMode={shadowParams.debugShadowMap ?? 'off'}
-        shadowMethod={shadowParams.method}
+        performanceMetrics={performanceMetrics}
+        onResetPerformanceMetrics={resetPerformanceMetrics}
         benchmarkOverlay={benchmarkOverlay}
         {...viewportProps}
       />
@@ -279,8 +434,6 @@ export default function App() {
         onExportScreenshot={handleExportScreenshot}
         onRunBenchmark={handleRunBenchmark}
         isBenchmarkRunning={isBenchmarkRunning}
-        performanceMetrics={performanceMetrics}
-        onResetPerformanceMetrics={resetPerformanceMetrics}
       />
     </div>
   );

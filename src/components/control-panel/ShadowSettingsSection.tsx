@@ -1,9 +1,10 @@
+import { useState } from 'react';
 import { SHADOW_METHODS } from './constants';
 import { HelpMark, RangeControl, SelectControl } from './FormControls';
 import { PanelSection } from './PanelSection';
 import { colorInputStyle, subtleButtonStyle } from './styles';
 import type { ControlPanelStrings, ShadowDebugMode, ShadowParams } from './types';
-import { getShadowQualityPreset, SHADOW_QUALITY_PRESETS } from '../../utils/shadowQuality';
+import { getAvailableShadowQualityPresets, getShadowQualityPreset } from '../../utils/shadowQuality';
 
 type Props = {
   params: ShadowParams;
@@ -32,6 +33,7 @@ const normalizeShadowDebugMode = (mode: ShadowDebugMode | undefined): ShadowDebu
 
 export function ShadowSettingsSection({ params, strings, onUpdate, mode = 'all' }: Props) {
   const isRu = strings.title === 'Настройки теней';
+  const [shadowPreviewOpen, setShadowPreviewOpen] = useState(false);
   const showScene = mode !== 'debug';
   const showDebug = mode !== 'scene';
   const isPCF = params.method === 'PCF';
@@ -43,8 +45,8 @@ export function ShadowSettingsSection({ params, strings, onUpdate, mode = 'all' 
     ...([0, 1, 2, 3, 4, 5, 6, 7] as const).map((slot) => ({
       value: `slot${slot}` as const,
       label: isVSM
-        ? `Slot ${slot} moments`
-        : `Slot ${slot} depth`
+        ? isRu ? `Слот ${slot}: моменты VSM` : `Slot ${slot}: VSM moments`
+        : isRu ? `Слот ${slot}: глубина` : `Slot ${slot}: depth`
     }))
   ];
   const lightDebugOptions = [
@@ -59,6 +61,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate, mode = 'all' 
     { value: 'activeShadow' as const, label: isRu ? 'Активная тень' : 'Active shadow' }
   ];
   const activeQuality = getShadowQualityPreset(params);
+  const qualityPresets = getAvailableShadowQualityPresets(params.method);
 
   return (
     <>
@@ -80,8 +83,8 @@ export function ShadowSettingsSection({ params, strings, onUpdate, mode = 'all' 
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, marginBottom: 5 }}>
             <span style={{ opacity: 0.85 }}>{strings.qualityPreset}</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 5 }}>
-            {SHADOW_QUALITY_PRESETS.map((preset) => {
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${qualityPresets.length}, minmax(0, 1fr))`, gap: 5 }}>
+            {qualityPresets.map((preset) => {
               const isActive = activeQuality?.id === preset.id;
               return (
               <button
@@ -268,12 +271,60 @@ export function ShadowSettingsSection({ params, strings, onUpdate, mode = 'all' 
 
           <SelectControl
             label={strings.shadowDebug}
-            help={isRu ? 'Выводит shadow map или VSM moments поверх сцены.' : 'Displays shadow map or VSM moments over the scene.'}
+            help={isRu ? 'Выводит карту теней или моменты VSM поверх сцены.' : 'Displays shadow map or VSM moments over the scene.'}
             value={debugShadowMap}
             options={shadowDebugOptions}
             onChange={(debugShadowMap) => onUpdate({ debugShadowMap })}
-            marginBottom={0}
+            marginBottom={8}
           />
+
+          <div style={{ paddingTop: 8, borderTop: '1px solid #2a303c' }}>
+            <button
+              type="button"
+              onClick={() => setShadowPreviewOpen((previous) => !previous)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: 0,
+                background: 'transparent',
+                border: 'none',
+                color: '#e6e6e6',
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: 600,
+                textAlign: 'left'
+              }}
+            >
+              <span>{isRu ? 'Просмотр карты теней' : 'Shadow map preview'}</span>
+              <span>{shadowPreviewOpen ? '▴' : '▾'}</span>
+            </button>
+
+            {shadowPreviewOpen ? (
+              <div style={{ marginTop: 8, display: 'grid', gap: 6, fontSize: 12, color: '#cfd6e4' }}>
+                <div
+                  style={{
+                    padding: '6px 8px',
+                    border: '1px solid #343b4a',
+                    borderRadius: 6,
+                    background: '#252a34'
+                  }}
+                >
+                  {debugShadowMap === 'off'
+                    ? isRu ? 'Предпросмотр выключен' : 'Preview is off'
+                    : isRu
+                      ? `Показывается: ${shadowDebugOptions.find((option) => option.value === debugShadowMap)?.label ?? debugShadowMap}`
+                      : `Showing: ${shadowDebugOptions.find((option) => option.value === debugShadowMap)?.label ?? debugShadowMap}`}
+                </div>
+                <div style={{ opacity: 0.72, lineHeight: 1.35 }}>
+                  {isRu
+                    ? 'Само изображение рисуется поверх сцены рядом с правой панелью, чтобы не перекрывать метрики производительности.'
+                    : 'The image is drawn over the scene next to the right panel so it does not cover performance metrics.'}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </PanelSection>
       )}
     </>

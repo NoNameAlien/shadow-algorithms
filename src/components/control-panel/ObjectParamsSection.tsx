@@ -20,6 +20,7 @@ type Props = {
   objectShininess: number;
   objectRoughness: number;
   objectMoveSpeed: number;
+  sharedRotationCenter: boolean;
   objectCastShadows: boolean;
   objectReceiveShadows: boolean;
   objectSelfShadows: boolean;
@@ -30,6 +31,7 @@ type Props = {
   onObjectShininessChange: (value: number) => void;
   onObjectRoughnessChange: (value: number) => void;
   onObjectMoveSpeedChange: (value: number) => void;
+  onSharedRotationCenterChange: (value: boolean) => void;
   onObjectCastShadowsChange: (value: boolean) => void;
   onObjectReceiveShadowsChange: (value: boolean) => void;
   onObjectSelfShadowsChange: (value: boolean) => void;
@@ -83,6 +85,7 @@ export function ObjectParamsSection({
   objectShininess,
   objectRoughness,
   objectMoveSpeed,
+  sharedRotationCenter,
   objectCastShadows,
   objectReceiveShadows,
   objectSelfShadows,
@@ -93,6 +96,7 @@ export function ObjectParamsSection({
   onObjectShininessChange,
   onObjectRoughnessChange,
   onObjectMoveSpeedChange,
+  onSharedRotationCenterChange,
   onObjectCastShadowsChange,
   onObjectReceiveShadowsChange,
   onObjectSelfShadowsChange
@@ -263,6 +267,16 @@ export function ObjectParamsSection({
           onChange={onObjectMoveSpeedChange}
           marginBottom={8}
         />
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4 }}>
+          <input
+            type="checkbox"
+            checked={sharedRotationCenter}
+            onChange={(event) => onSharedRotationCenterChange(event.target.checked)}
+          />
+          {lang === 'ru' ? 'Общий центр вращения' : 'Shared rotation center'}
+          <HelpMark text={lang === 'ru' ? 'Все объекты вращаются вокруг общего центра группы, а не вокруг своих локальных центров.' : 'All objects rotate around the group center instead of their own local centers.'} />
+        </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4 }}>
           <input

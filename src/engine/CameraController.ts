@@ -261,8 +261,11 @@ export class CameraController {
         console.log('Camera reset to orbit mode');
     }
 
-    setOrbitView(theta: number, phi: number, distance = this.distance) {
+    setOrbitView(theta: number, phi: number, distance = this.distance, target?: [number, number, number]) {
         this.mode = 'orbit';
+        if (target) {
+            vec3.set(this.target, target[0], target[1], target[2]);
+        }
         this.theta = theta;
         this.phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi));
         this.distance = Math.max(2, Math.min(30, distance));

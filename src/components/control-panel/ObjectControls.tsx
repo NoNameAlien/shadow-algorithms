@@ -32,6 +32,8 @@ type Props = Pick<
   | 'onObjectRoughnessChange'
   | 'objectMoveSpeed'
   | 'onObjectMoveSpeedChange'
+  | 'sharedRotationCenter'
+  | 'onSharedRotationCenterChange'
 > & {
   lang: Lang;
   strings: ControlPanelStrings;
@@ -67,7 +69,9 @@ export function ObjectControls({
   objectRoughness,
   onObjectRoughnessChange,
   objectMoveSpeed,
-  onObjectMoveSpeedChange
+  onObjectMoveSpeedChange,
+  sharedRotationCenter,
+  onSharedRotationCenterChange
 }: Props) {
   return (
     <>
@@ -96,6 +100,7 @@ export function ObjectControls({
         objectShininess={objectShininess}
         objectRoughness={objectRoughness}
         objectMoveSpeed={objectMoveSpeed}
+        sharedRotationCenter={sharedRotationCenter}
         objectCastShadows={objectCastShadows}
         objectReceiveShadows={objectReceiveShadows}
         objectSelfShadows={objectSelfShadows}
@@ -106,6 +111,7 @@ export function ObjectControls({
         onObjectShininessChange={onObjectShininessChange}
         onObjectRoughnessChange={onObjectRoughnessChange}
         onObjectMoveSpeedChange={onObjectMoveSpeedChange}
+        onSharedRotationCenterChange={onSharedRotationCenterChange}
         onObjectCastShadowsChange={onObjectCastShadowsChange}
         onObjectReceiveShadowsChange={onObjectReceiveShadowsChange}
         onObjectSelfShadowsChange={onObjectSelfShadowsChange}

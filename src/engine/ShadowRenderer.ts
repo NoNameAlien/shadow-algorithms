@@ -25,6 +25,8 @@ export class ShadowRenderer {
   vsmBlurView!: GPUTextureView;
   vsmBlurLayerViews: GPUTextureView[] = [];
   vsmSampler!: GPUSampler;
+  vsmBlurParamsBuf!: GPUBuffer;
+  private vsmBlurParams = new Float32Array(4);
 
   createShadowResources(device: GPUDevice, shadowSize: number, layerCount: number): void {
     const resources = createShadowResourceSet(device, shadowSize, layerCount, {
@@ -69,6 +71,14 @@ export class ShadowRenderer {
     this.vsmBlurView = resources.vsmBlurView;
     this.vsmBlurLayerViews = resources.vsmBlurLayerViews;
     this.vsmSampler = resources.vsmSampler;
+
+    if (!this.vsmBlurParamsBuf) {
+      this.vsmBlurParamsBuf = device.createBuffer({
+        label: "vsm blur params",
+        size: 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+    }
   }
 
   createVsmBlurBindGroups(
@@ -85,6 +95,7 @@ export class ShadowRenderer {
         entries: [
           { binding: 0, resource: this.vsmMomentsView },
           { binding: 1, resource: this.vsmTempView },
+          { binding: 2, resource: { buffer: this.vsmBlurParamsBuf } },
         ],
       }),
       vertical: device.createBindGroup({
@@ -92,6 +103,7 @@ export class ShadowRenderer {
         entries: [
           { binding: 0, resource: this.vsmTempView },
           { binding: 1, resource: this.vsmBlurView },
+          { binding: 2, resource: { buffer: this.vsmBlurParamsBuf } },
         ],
       }),
     };
@@ -169,6 +181,7 @@ export class ShadowRenderer {
   }
 
   renderVsmSlots(params: {
+    device: GPUDevice;
     encoder: GPUCommandEncoder;
     slots: ShadowSlot[];
     vsmMomentsPipeline: GPURenderPipeline;
@@ -206,20 +219,34 @@ export class ShadowRenderer {
     }
 
     this.clearInactiveVsmDebugSlot(params.encoder, params.slots, params.debugShadowSlotIndex);
+    this.writeVsmBlurParams(params.device, params.shadowSize);
+
+    const activeLayerCount = Math.max(1, params.slots.length);
 
     const blurH = params.encoder.beginComputePass();
     blurH.setPipeline(params.blurHorizontalPipeline);
     blurH.setBindGroup(0, params.vsmBlurBindGroups.horizontal);
     const workgroupsX = Math.ceil(params.shadowSize / 8);
     const workgroupsY = Math.ceil(params.shadowSize / 8);
-    blurH.dispatchWorkgroups(workgroupsX, workgroupsY, params.layerCount);
+    blurH.dispatchWorkgroups(workgroupsX, workgroupsY, activeLayerCount);
     blurH.end();
 
     const blurV = params.encoder.beginComputePass();
     blurV.setPipeline(params.blurVerticalPipeline);
     blurV.setBindGroup(0, params.vsmBlurBindGroups.vertical);
-    blurV.dispatchWorkgroups(workgroupsX, workgroupsY, params.layerCount);
+    blurV.dispatchWorkgroups(workgroupsX, workgroupsY, activeLayerCount);
     blurV.end();
+  }
+
+  private writeVsmBlurParams(device: GPUDevice, shadowSize: number): void {
+    const scaledRadius = Math.round(6 * (shadowSize / 512));
+    const radius = Math.max(1, Math.min(48, scaledRadius));
+
+    this.vsmBlurParams[0] = radius;
+    this.vsmBlurParams[1] = Math.max(1, radius / 2.5);
+    this.vsmBlurParams[2] = 0;
+    this.vsmBlurParams[3] = 0;
+    device.queue.writeBuffer(this.vsmBlurParamsBuf, 0, this.vsmBlurParams);
   }
 
   private clearInactiveDepthDebugSlot(
@@ -309,6 +336,7 @@ export class ShadowRenderer {
     this.vsmMomentsTex?.destroy();
     this.vsmTempTex?.destroy();
     this.vsmBlurTex?.destroy();
+    this.vsmBlurParamsBuf?.destroy();
 
     this.shadowDebugTextures = [];
     this.shadowDebugViews = [];

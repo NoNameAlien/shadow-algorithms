@@ -1,4 +1,5 @@
 import type { ShadowParams } from '../components/control-panel/types';
+import type { ShadowMethod } from '../engine/types';
 
 export type ShadowQualityId = 'raw' | 'low' | 'medium' | 'high';
 
@@ -9,6 +10,7 @@ export type ShadowQualityPreset = {
     ru: string;
   };
   params: Partial<ShadowParams>;
+  methods?: ShadowMethod[];
 };
 
 export const SHADOW_QUALITY_PRESETS: ShadowQualityPreset[] = [
@@ -25,7 +27,8 @@ export const SHADOW_QUALITY_PRESETS: ShadowQualityPreset[] = [
       pcssBlockerSearchSamples: 8,
       vsmLightBleedReduction: 0.55,
       shadowStrength: 1.15
-    }
+    },
+    methods: ['SM']
   },
   {
     id: 'low',
@@ -37,7 +40,7 @@ export const SHADOW_QUALITY_PRESETS: ShadowQualityPreset[] = [
       pcfSamples: 4,
       pcssLightSize: 0.04,
       pcssBlockerSearchSamples: 8,
-      vsmLightBleedReduction: 0.5
+      vsmLightBleedReduction: 0.25
     }
   },
   {
@@ -50,7 +53,7 @@ export const SHADOW_QUALITY_PRESETS: ShadowQualityPreset[] = [
       pcfSamples: 8,
       pcssLightSize: 0.08,
       pcssBlockerSearchSamples: 8,
-      vsmLightBleedReduction: 0.4
+      vsmLightBleedReduction: 0.2
     }
   },
   {
@@ -63,20 +66,25 @@ export const SHADOW_QUALITY_PRESETS: ShadowQualityPreset[] = [
       pcfSamples: 32,
       pcssLightSize: 0.14,
       pcssBlockerSearchSamples: 32,
-      vsmLightBleedReduction: 0.3
+      vsmLightBleedReduction: 0.18
     }
   }
 ];
 
+export function getAvailableShadowQualityPresets(method: ShadowMethod): ShadowQualityPreset[] {
+  return SHADOW_QUALITY_PRESETS.filter((preset) => !preset.methods || preset.methods.includes(method));
+}
+
 export function getShadowQualityPreset(params: ShadowParams): ShadowQualityPreset | null {
-  return SHADOW_QUALITY_PRESETS.find((preset) =>
-    Object.entries(preset.params).every(([key, value]) => {
-      const actual = params[key as keyof ShadowParams];
-      if (typeof value === 'number' && typeof actual === 'number') {
-        return Math.abs(actual - value) < 0.000001;
-      }
-      return actual === value;
-    })
+  const availablePresets = getAvailableShadowQualityPresets(params.method);
+
+  if (params.method === 'SM' && params.shadowMapSize === 512) {
+    return availablePresets.find((preset) => preset.id === 'raw') ?? null;
+  }
+
+  return availablePresets.find((preset) =>
+    preset.id !== 'raw' &&
+    preset.params.shadowMapSize === params.shadowMapSize
   ) ?? null;
 }
 

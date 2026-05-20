@@ -6,7 +6,6 @@ import { HintsSection } from './HintsSection';
 import { LightDiagnosticsSection } from './LightSettingsSection';
 import { LightControls } from './LightControls';
 import { ObjectControls } from './ObjectControls';
-import { PerformanceMetricsSection } from './PerformanceMetricsSection';
 import { SceneControls } from './SceneControls';
 import { ShadowSettings } from './ShadowSettings';
 import { dangerButtonStyle, panelStyle, subtleButtonStyle } from './styles';
@@ -30,8 +29,6 @@ export function ControlPanel({
   onToggleAutoRotate,
   sharedRotationCenter,
   onSharedRotationCenterChange,
-  performanceMetrics,
-  onResetPerformanceMetrics,
   showFloor,
   showWalls,
   floorSize,
@@ -193,13 +190,11 @@ export function ControlPanel({
     >
       <Header
         autoRotate={autoRotate}
-        sharedRotationCenter={sharedRotationCenter}
         lang={lang}
         method={params.method}
         strings={strings}
         onLanguageChange={onLanguageChange}
         onToggleAutoRotate={onToggleAutoRotate}
-        onSharedRotationCenterChange={onSharedRotationCenterChange}
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
@@ -290,6 +285,8 @@ export function ControlPanel({
         onObjectRoughnessChange={onObjectRoughnessChange}
         objectMoveSpeed={objectMoveSpeed}
         onObjectMoveSpeedChange={onObjectMoveSpeedChange}
+        sharedRotationCenter={sharedRotationCenter}
+        onSharedRotationCenterChange={onSharedRotationCenterChange}
           />
 
           <SceneControls
@@ -335,33 +332,31 @@ export function ControlPanel({
             lang={lang}
             diagnostics={activeLightDiagnostics}
           />
-          <PerformanceMetricsSection
-            lang={lang}
-            strings={strings}
-            metrics={performanceMetrics}
-            onReset={onResetPerformanceMetrics}
-          />
         </>
       )}
 
-      <button
-        type="button"
-        onClick={resetPanel}
-        style={{
-          ...dangerButtonStyle,
-          width: '100%',
-          padding: 8,
-          marginBottom: 8
-        }}
-      >
-        {strings.resetScene}
-      </button>
+      {activeTab === 'scene' ? (
+        <>
+          <button
+            type="button"
+            onClick={resetPanel}
+            style={{
+              ...dangerButtonStyle,
+              width: '100%',
+              padding: 8,
+              marginBottom: 8
+            }}
+          >
+            {strings.resetScene}
+          </button>
 
-      <HintsSection
-        lang={lang}
-        strings={strings}
-        isPointerLocked={isPointerLocked}
-      />
+          <HintsSection
+            lang={lang}
+            strings={strings}
+            isPointerLocked={isPointerLocked}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

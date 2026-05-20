@@ -201,7 +201,7 @@ export class Renderer {
     pcssLightSize: 0.08,
     pcssBlockerSearchSamples: 8,
     vsmMinVariance: 0.0001,
-    vsmLightBleedReduction: 0.4,
+    vsmLightBleedReduction: 0.2,
     shadowStrength: 1.0,
     ambientStrength: 0.4,
     exposure: 0.9,
@@ -692,8 +692,8 @@ export class Renderer {
     return this.sharedRotationCenter;
   }
 
-  setBenchmarkOrbitView(theta: number, phi: number, distance: number) {
-    this.cameraController.setOrbitView(theta, phi, distance);
+  setBenchmarkOrbitView(theta: number, phi: number, distance: number, target?: [number, number, number]) {
+    this.cameraController.setOrbitView(theta, phi, distance, target);
     this.updateViewProj();
   }
 
@@ -2568,6 +2568,7 @@ export class Renderer {
     // Shadow pass
     if (this.shadowParams.method === "VSM") {
       this.shadowRenderer.renderVsmSlots({
+        device,
         encoder,
         slots: shadowSlots,
         vsmMomentsPipeline: this.vsmMomentsPipeline,
@@ -2704,10 +2705,15 @@ export class Renderer {
     const dprY = rect.height > 0 ? this.canvas.height / rect.height : 1;
     const previewCssSize = Math.min(220, Math.floor(Math.min(rect.width, rect.height) * 0.26));
     const marginCss = 16;
+    const sidePanelCssWidth = 340;
     const previewWidth = Math.floor(previewCssSize * dprX);
     const previewHeight = Math.floor(previewCssSize * dprY);
-    const x = Math.floor(marginCss * dprX);
-    const y = Math.max(Math.floor(marginCss * dprY), this.canvas.height - previewHeight - Math.floor(marginCss * dprY));
+    const rightMargin = Math.floor((sidePanelCssWidth + marginCss) * dprX);
+    const x = Math.max(
+      Math.floor(marginCss * dprX),
+      this.canvas.width - previewWidth - rightMargin,
+    );
+    const y = Math.floor(marginCss * dprY);
 
     const debugPass = encoder.beginRenderPass({
       colorAttachments: [

@@ -74,8 +74,6 @@ export type ControlPanelProps = {
   onToggleAutoRotate: () => void;
   sharedRotationCenter: boolean;
   onSharedRotationCenterChange: (value: boolean) => void;
-  performanceMetrics?: PerformanceMetrics;
-  onResetPerformanceMetrics?: () => void;
   showFloor: boolean;
   showWalls: boolean;
   floorSize: number;

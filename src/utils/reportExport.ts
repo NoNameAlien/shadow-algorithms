@@ -406,6 +406,14 @@ const createBenchmarkPdfBytes = (report: BenchmarkReport) => {
     pageObjectIds.push(pageId);
   };
 
+  const chunk = <T,>(items: T[], size: number): T[][] => {
+    const result: T[][] = [];
+    for (let index = 0; index < items.length; index += size) {
+      result.push(items.slice(index, index + size));
+    }
+    return result;
+  };
+
   const bestByScene = report.scenePresets.map((presetId) => {
     const sceneSamples = report.samples.filter((sample) => sample.presetId === presetId);
     const best = sceneSamples
@@ -433,16 +441,20 @@ const createBenchmarkPdfBytes = (report: BenchmarkReport) => {
   for (const presetId of report.scenePresets) {
     const sceneSamples = report.samples.filter((sample) => sample.presetId === presetId);
     const first = sceneSamples[0];
-    addPage(
-      [
-        `Scene: ${first?.presetLabel ?? presetId}`,
-        ...sceneSamples.flatMap((sample) => [
-          `${sample.method}: avg ${sample.performanceMetrics.averageFps} FPS, p95 ${sample.frameTimeP95Ms.toFixed(2)} ms, map ${sample.shadowParams.shadowMapSize}`,
-          `  ${sample.findings.slice(0, 2).join(' ')}`,
-        ]),
-      ],
-      sceneSamples.map((sample) => sample.screenshot).filter((image): image is BenchmarkScreenshot => Boolean(image)),
-    );
+    const samplePages = chunk(sceneSamples, 4);
+    for (let pageIndex = 0; pageIndex < Math.max(1, samplePages.length); pageIndex++) {
+      const pageSamples = samplePages[pageIndex] ?? [];
+      addPage(
+        [
+          `Scene: ${first?.presetLabel ?? presetId}${samplePages.length > 1 ? ` (${pageIndex + 1}/${samplePages.length})` : ''}`,
+          ...pageSamples.flatMap((sample) => [
+            `${sample.method} ${sample.shadowParams.shadowMapSize}px: avg ${sample.performanceMetrics.averageFps} FPS, p95 ${sample.frameTimeP95Ms.toFixed(2)} ms`,
+            `  ${sample.findings.slice(0, 2).join(' ')}`,
+          ]),
+        ],
+        pageSamples.map((sample) => sample.screenshot).filter((image): image is BenchmarkScreenshot => Boolean(image)),
+      );
+    }
   }
 
   setObject(catalogId, makePdfObject(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`));

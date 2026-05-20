@@ -2,28 +2,23 @@ import type { ControlPanelStrings, Lang, ShadowMethod } from './types';
 
 type Props = {
   autoRotate: boolean;
-  sharedRotationCenter: boolean;
   lang: Lang;
   method: ShadowMethod;
   strings: ControlPanelStrings;
   onLanguageChange: (lang: Lang) => void;
   onToggleAutoRotate: () => void;
-  onSharedRotationCenterChange: (value: boolean) => void;
 };
 
 export function Header({
   autoRotate,
-  sharedRotationCenter,
   lang,
   method,
   strings,
   onLanguageChange,
-  onToggleAutoRotate,
-  onSharedRotationCenterChange
+  onToggleAutoRotate
 }: Props) {
   return (
-    <div style={{ marginBottom: 10 }}>
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
       <div>
         <div style={{ fontSize: 16, fontWeight: 600 }}>{strings.title}</div>
         <div
@@ -93,15 +88,6 @@ export function Header({
           </button>
         ))}
       </div>
-    </div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 13, color: '#cfd6e4' }}>
-        <input
-          type="checkbox"
-          checked={sharedRotationCenter}
-          onChange={(event) => onSharedRotationCenterChange(event.target.checked)}
-        />
-        {lang === 'ru' ? 'Общий центр вращения' : 'Shared rotation center'}
-      </label>
     </div>
   );
 }

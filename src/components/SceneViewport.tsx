@@ -1,6 +1,8 @@
 import type { RefObject } from 'react';
-import type { LightMode, ShadowDebugMode, ShadowMethod } from '../engine/Renderer';
-import type { Lang } from './control-panel/types';
+import type { LightMode } from '../engine/Renderer';
+import { PerformanceMetricsSection } from './control-panel/PerformanceMetricsSection';
+import { STRINGS } from './control-panel/constants';
+import type { Lang, PerformanceMetrics } from './control-panel/types';
 import sunIcon from '../image/light/sun.png';
 import spotIcon from '../image/light/spot.png';
 import topIcon from '../image/light/top.png';
@@ -18,8 +20,8 @@ type Props = {
   lightsScreen: LightScreenPosition[];
   error: string | null;
   lang: Lang;
-  shadowDebugMode: ShadowDebugMode;
-  shadowMethod: ShadowMethod;
+  performanceMetrics: PerformanceMetrics;
+  onResetPerformanceMetrics: () => void;
   benchmarkOverlay?: string | null;
 };
 
@@ -29,67 +31,30 @@ const lightIcons: Record<LightMode, string> = {
   top: topIcon
 };
 
-const shadowDebugSlotLabel = (mode: ShadowDebugMode, method: ShadowMethod) => {
-  const slot = mode === 'secondary'
-    ? 1
-    : mode === 'primary'
-      ? 0
-      : mode.startsWith('slot')
-        ? Number(mode.slice(4))
-        : 0;
-
-  return method === 'VSM' ? `Slot ${slot} moments` : `Slot ${slot} depth`;
-};
-
 export function SceneViewport({
   canvasRef,
   lightsScreen,
   error,
   lang,
-  shadowDebugMode,
-  shadowMethod,
+  performanceMetrics,
+  onResetPerformanceMetrics,
   benchmarkOverlay
 }: Props) {
-  const debugLabel = shadowDebugSlotLabel(shadowDebugMode, shadowMethod);
+  const strings = STRINGS[lang];
 
   return (
     <div style={{ position: 'relative', flex: 1 }}>
       <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
 
-      {shadowDebugMode !== 'off' && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 16,
-            left: 16,
-            zIndex: 3,
-            width: 220,
-            pointerEvents: 'none'
-          }}
-        >
-          <div
-            style={{
-              padding: '5px 8px',
-              background: 'rgba(20, 22, 26, 0.86)',
-              border: '1px solid #485163',
-              borderBottom: 'none',
-              borderRadius: '6px 6px 0 0',
-              fontSize: 12,
-              fontWeight: 700
-            }}
-          >
-            {lang === 'ru' ? 'Shadow Map' : 'Shadow Map'}: {debugLabel}
-          </div>
-          <div
-            style={{
-              height: 220,
-              border: '1px solid #485163',
-              borderRadius: '0 0 6px 6px',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.28)'
-            }}
-          />
-        </div>
-      )}
+      <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 2 }}>
+        <PerformanceMetricsSection
+          lang={lang}
+          strings={strings}
+          metrics={performanceMetrics}
+          floating
+          onReset={onResetPerformanceMetrics}
+        />
+      </div>
 
       {benchmarkOverlay && (
         <div

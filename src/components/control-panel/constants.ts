@@ -9,7 +9,7 @@ export const INITIAL_PARAMS: ShadowParams = {
   pcssLightSize: 0.08,
   pcssBlockerSearchSamples: 8,
   vsmMinVariance: 0.0001,
-  vsmLightBleedReduction: 0.4,
+  vsmLightBleedReduction: 0.2,
   shadowStrength: 1.0,
   ambientStrength: 0.4,
   exposure: 0.9,
