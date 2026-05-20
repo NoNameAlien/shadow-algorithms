@@ -46,6 +46,7 @@ struct ShadowMatrices {
 @group(1) @binding(1) var shadowSampler: sampler_comparison;
 @group(1) @binding(2) var momentsTex: texture_2d_array<f32>;
 @group(1) @binding(3) var momentsSampler: sampler;
+@group(1) @binding(4) var rawMomentsTex: texture_2d_array<f32>;
 
 @group(2) @binding(0) var floorTex: texture_2d<f32>;
 @group(2) @binding(1) var floorSampler: sampler;
@@ -146,6 +147,7 @@ fn shadowVisibilityFloor(lightSpacePos: vec4<f32>, light: Light, lightIndex: i32
   if (method == SHADOW_METHOD_VSM) {
     let unbiasedSample = makeUnbiasedShadowSample(lightSpacePos);
     let moments = textureSample(momentsTex, momentsSampler, unbiasedSample.uv, lightIndex).rg;
+    let rawMoments = textureSample(rawMomentsTex, momentsSampler, unbiasedSample.uv, lightIndex).rg;
     let receiverDepth = pcssDepthForFloorLight(light, unbiasedSample.depth);
     let mean = moments.x;
     let meanSquare = moments.y;
@@ -158,7 +160,25 @@ fn shadowVisibilityFloor(lightSpacePos: vec4<f32>, light: Light, lightIndex: i32
       let pMax = variance / (variance + d * d);
       let bleedReduction = shadowParamY(u.shadowParams);
       visibility = clamp((pMax - bleedReduction) / (1.0 - bleedReduction), 0.0, 1.0);
+      visibility = pow(visibility, 1.16);
     }
+
+    let rawMean = rawMoments.x;
+    let rawMeanSquare = rawMoments.y;
+    var rawVisibility: f32 = 1.0;
+    if (receiverDepth > rawMean) {
+      let minVariance = shadowBias(u.shadowParams);
+      let variance = max(rawMeanSquare - rawMean * rawMean, minVariance);
+      let d = receiverDepth - rawMean;
+      let pMax = variance / (variance + d * d);
+      let bleedReduction = shadowParamY(u.shadowParams);
+      rawVisibility = clamp((pMax - bleedReduction) / (1.0 - bleedReduction), 0.0, 1.0);
+      rawVisibility = pow(rawVisibility, 1.16);
+    }
+
+    let vsmLeak = max(visibility - rawVisibility, 0.0);
+    let leakClamp = smoothstep(0.16, 0.46, vsmLeak) * (1.0 - smoothstep(0.78, 0.96, visibility));
+    visibility = mix(visibility, min(visibility, rawVisibility), leakClamp * 0.78);
 
     return select(visibility, 1.0, !unbiasedSample.inBounds);
   }

@@ -1751,6 +1751,7 @@ export class Renderer {
         entries: [
           { binding: 0, resource: this.vsmBlurView },
           { binding: 1, resource: this.vsmSampler },
+          { binding: 2, resource: this.shadowRenderer.vsmMomentsView },
         ],
       });
     } else if (
@@ -1809,6 +1810,7 @@ export class Renderer {
         { binding: 1, resource: this.shadowSampler },
         { binding: 2, resource: this.vsmBlurView },
         { binding: 3, resource: this.vsmSampler },
+        { binding: 4, resource: this.shadowRenderer.vsmMomentsView },
       ],
     });
 

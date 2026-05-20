@@ -40,7 +40,8 @@ export const SHADOW_QUALITY_PRESETS: ShadowQualityPreset[] = [
       pcfSamples: 4,
       pcssLightSize: 0.04,
       pcssBlockerSearchSamples: 8,
-      vsmLightBleedReduction: 0.25
+      vsmMinVariance: 0.00003,
+      vsmLightBleedReduction: 0.38
     }
   },
   {
@@ -53,7 +54,8 @@ export const SHADOW_QUALITY_PRESETS: ShadowQualityPreset[] = [
       pcfSamples: 8,
       pcssLightSize: 0.08,
       pcssBlockerSearchSamples: 8,
-      vsmLightBleedReduction: 0.2
+      vsmMinVariance: 0.00002,
+      vsmLightBleedReduction: 0.34
     }
   },
   {
@@ -66,7 +68,8 @@ export const SHADOW_QUALITY_PRESETS: ShadowQualityPreset[] = [
       pcfSamples: 32,
       pcssLightSize: 0.14,
       pcssBlockerSearchSamples: 32,
-      vsmLightBleedReduction: 0.18
+      vsmMinVariance: 0.000012,
+      vsmLightBleedReduction: 0.32
     }
   }
 ];

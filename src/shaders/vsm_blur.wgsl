@@ -9,7 +9,7 @@ struct BlurParams {
 
 @group(0) @binding(2) var<uniform> blurParams: BlurParams;
 
-const MAX_RADIUS: i32 = 48;
+const MAX_RADIUS: i32 = 8;
 
 fn gaussianWeight(offset: i32) -> f32 {
   let x = f32(offset);

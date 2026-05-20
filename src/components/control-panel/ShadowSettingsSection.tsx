@@ -62,6 +62,15 @@ export function ShadowSettingsSection({ params, strings, onUpdate, mode = 'all' 
   ];
   const activeQuality = getShadowQualityPreset(params);
   const qualityPresets = getAvailableShadowQualityPresets(params.method);
+  const handleMethodChange = (method: typeof params.method) => {
+    if (activeQuality?.id === 'raw' && method !== 'SM') {
+      const lowPreset = getAvailableShadowQualityPresets(method).find((preset) => preset.id === 'low');
+      onUpdate({ ...lowPreset?.params, method });
+      return;
+    }
+
+    onUpdate({ method });
+  };
 
   return (
     <>
@@ -76,7 +85,7 @@ export function ShadowSettingsSection({ params, strings, onUpdate, mode = 'all' 
             value: method,
             label: method === 'SM' ? 'Shadow Mapping' : method
           }))}
-          onChange={(method) => onUpdate({ method })}
+          onChange={handleMethodChange}
         />
 
         <div style={{ marginBottom: 8 }}>

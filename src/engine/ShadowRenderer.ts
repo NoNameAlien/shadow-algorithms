@@ -239,11 +239,10 @@ export class ShadowRenderer {
   }
 
   private writeVsmBlurParams(device: GPUDevice, shadowSize: number): void {
-    const scaledRadius = Math.round(6 * (shadowSize / 512));
-    const radius = Math.max(1, Math.min(48, scaledRadius));
+    const radius = shadowSize <= 1024 ? 4 : 8;
 
     this.vsmBlurParams[0] = radius;
-    this.vsmBlurParams[1] = Math.max(1, radius / 2.5);
+    this.vsmBlurParams[1] = shadowSize <= 1024 ? 1.35 : 2.5;
     this.vsmBlurParams[2] = 0;
     this.vsmBlurParams[3] = 0;
     device.queue.writeBuffer(this.vsmBlurParamsBuf, 0, this.vsmBlurParams);

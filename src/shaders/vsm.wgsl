@@ -2,6 +2,7 @@
 
 @group(1) @binding(0) var momentsTex: texture_2d_array<f32>;
 @group(1) @binding(1) var momentsSampler: sampler;
+@group(1) @binding(2) var rawMomentsTex: texture_2d_array<f32>;
 
 fn chebyshevUpperBound(moments: vec2<f32>, t: f32) -> f32 {
   let mean = moments.x;
@@ -23,6 +24,7 @@ fn chebyshevUpperBound(moments: vec2<f32>, t: f32) -> f32 {
   // Light bleeding reduction: линейное сжатие
   let bleedReduction = shadowParamY(u.shadowParams);
   pMax = clamp((pMax - bleedReduction) / (1.0 - bleedReduction), 0.0, 1.0);
+  pMax = pow(pMax, 1.16);
   
   return pMax;
 }
@@ -49,7 +51,12 @@ fn shadowVisibilityIndexed(lightSpacePos: vec4<f32>, light: Light, lightIndex: i
   
   // ВСЕГДА читаем моменты (uniform control flow)
   let moments = textureSample(momentsTex, momentsSampler, sample.uv, lightIndex).rg;
-  let visibility = chebyshevUpperBound(moments, receiverDepth);
+  let rawMoments = textureSample(rawMomentsTex, momentsSampler, sample.uv, lightIndex).rg;
+  var visibility = chebyshevUpperBound(moments, receiverDepth);
+  let rawVisibility = chebyshevUpperBound(rawMoments, receiverDepth);
+  let vsmLeak = max(visibility - rawVisibility, 0.0);
+  let leakClamp = smoothstep(0.16, 0.46, vsmLeak) * (1.0 - smoothstep(0.78, 0.96, visibility));
+  visibility = mix(visibility, min(visibility, rawVisibility), leakClamp * 0.78);
   
   // Возвращаем 1.0 если вне границ, иначе результат VSM
   return select(visibility, 1.0, !sample.inBounds);
