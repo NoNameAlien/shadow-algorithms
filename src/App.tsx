@@ -35,13 +35,13 @@ const BENCHMARK_CAMERA: Record<ScenePresetId, { startTheta: number; arc: number;
 };
 
 const STAIRS_FOCUS_ID = 'stairsFocus';
-const STAIRS_FOCUS_LABEL = 'Stairs close-up';
+const STAIRS_FOCUS_LABEL = 'Stairs shadow study';
 const STAIRS_FOCUS_CAMERA = {
-  startTheta: Math.PI * 0.88,
-  arc: -Math.PI * 0.015,
-  phi: Math.PI * 0.4,
-  distance: 2.05,
-  target: [1.05, 0.25, -0.78] as [number, number, number]
+  startTheta: Math.PI * 0.82,
+  arc: -Math.PI * 0.02,
+  phi: Math.PI * 0.31,
+  distance: 5.2,
+  target: [0.65, -0.7, -0.1] as [number, number, number]
 };
 
 export default function App() {
@@ -170,58 +170,153 @@ export default function App() {
 
     renderer.applyScenePreset('stairs');
     const scene = renderer.exportScene();
+    const floorY = -2.5;
+    const cubeY = (halfHeight: number) => floorY + halfHeight;
+    const sphereY = (scale: number) => floorY + 1.15 * scale;
+
     scene.showWalls = false;
     scene.showGrid = false;
-    scene.floorSize = 18;
-    scene.floorColor = [0.97, 0.97, 0.94];
-    scene.wallColor = [0.97, 0.97, 0.94];
-    scene.objects = scene.objects.map((object, index) => ({
-      ...object,
-      color: [
-        0.58 + Math.min(index, 7) * 0.025,
-        0.39 + Math.min(index, 7) * 0.018,
-        0.24 + Math.min(index, 7) * 0.012
-      ] as [number, number, number],
-      roughness: 0.84,
-      specular: 0.12
-    }));
-    scene.objects.push({
-      name: 'Sphere on top step',
-      pos: [3.2, 0.9, -0.28],
-      scale: [0.32, 0.32, 0.32],
-      moveSpeed: 0,
-      meshId: 2,
-      color: [0.72, 0.5, 0.32],
-      castShadows: true,
-      receiveShadows: true,
-      selfShadows: true,
-      specular: 0.16,
-      shininess: 28,
-      roughness: 0.78
-    });
+    scene.floorSize = 16;
+    scene.floorColor = [0.95, 0.94, 0.9];
+    scene.wallColor = [0.95, 0.94, 0.9];
+    scene.objects = [
+      {
+        name: 'Foreground step',
+        pos: [-0.35, cubeY(0.48), -0.54],
+        scale: [0.68, 0.48, 1.18],
+        moveSpeed: 0,
+        meshId: 1,
+        color: [0.56, 0.36, 0.2],
+        castShadows: true,
+        receiveShadows: true,
+        selfShadows: true,
+        specular: 0.11,
+        shininess: 22,
+        roughness: 0.86
+      },
+      {
+        name: 'Middle step',
+        pos: [0.48, cubeY(0.78), -0.26],
+        scale: [0.68, 0.78, 1.18],
+        moveSpeed: 0,
+        meshId: 0,
+        color: [0.61, 0.4, 0.23],
+        castShadows: true,
+        receiveShadows: true,
+        selfShadows: true,
+        specular: 0.11,
+        shininess: 22,
+        roughness: 0.84
+      },
+      {
+        name: 'Upper step',
+        pos: [1.3, cubeY(1.08), 0.02],
+        scale: [0.68, 1.08, 1.18],
+        moveSpeed: 0,
+        meshId: 1,
+        color: [0.66, 0.44, 0.26],
+        castShadows: true,
+        receiveShadows: true,
+        selfShadows: true,
+        specular: 0.12,
+        shininess: 24,
+        roughness: 0.82
+      },
+      {
+        name: 'Back step',
+        pos: [2.12, cubeY(1.34), 0.3],
+        scale: [0.62, 1.34, 1.08],
+        moveSpeed: 0,
+        meshId: 0,
+        color: [0.7, 0.47, 0.28],
+        castShadows: true,
+        receiveShadows: true,
+        selfShadows: true,
+        specular: 0.12,
+        shininess: 24,
+        roughness: 0.8
+      },
+      {
+        name: 'Contact slab',
+        pos: [-1.3, cubeY(0.14), -1.0],
+        scale: [0.9, 0.14, 0.34],
+        moveSpeed: 0,
+        meshId: 0,
+        color: [0.48, 0.3, 0.17],
+        castShadows: true,
+        receiveShadows: true,
+        selfShadows: true,
+        specular: 0.1,
+        shininess: 20,
+        roughness: 0.9
+      },
+      {
+        name: 'Low matte sphere',
+        pos: [-1.05, sphereY(0.36), 0.84],
+        scale: [0.36, 0.36, 0.36],
+        moveSpeed: 0,
+        meshId: 2,
+        color: [0.7, 0.49, 0.3],
+        castShadows: true,
+        receiveShadows: true,
+        selfShadows: true,
+        specular: 0.13,
+        shininess: 26,
+        roughness: 0.8
+      },
+      {
+        name: 'Slim side block',
+        pos: [0.24, cubeY(0.72), 1.08],
+        scale: [0.22, 0.72, 0.28],
+        moveSpeed: 0,
+        meshId: 1,
+        color: [0.58, 0.38, 0.22],
+        castShadows: true,
+        receiveShadows: true,
+        selfShadows: true,
+        specular: 0.11,
+        shininess: 22,
+        roughness: 0.86
+      },
+      {
+        name: 'Distant small block',
+        pos: [2.4, cubeY(0.36), -1.02],
+        scale: [0.34, 0.36, 0.34],
+        moveSpeed: 0,
+        meshId: 1,
+        color: [0.64, 0.42, 0.24],
+        castShadows: true,
+        receiveShadows: true,
+        selfShadows: true,
+        specular: 0.1,
+        shininess: 22,
+        roughness: 0.84
+      }
+    ];
 
     scene.lights = scene.lights.map((light, index) => {
       if (index === 0) {
         return {
           ...light,
-          name: 'Low directional stair light',
-          pos: [-8.5, 2.75, 6.2],
-          type: 'sun',
-          yaw: 2.38,
-          pitch: -0.22,
-          intensity: 3.55,
-          color: [1.0, 0.97, 0.9],
-          innerConeDeg: 16,
-          outerConeDeg: 46,
-          range: 28,
-          falloff: 1.05,
+          name: 'Warm low key light',
+          pos: [-5.8, 3.15, 4.25],
+          type: 'spot',
+          yaw: 2.16,
+          pitch: -0.52,
+          intensity: 4.35,
+          color: [1.0, 0.94, 0.82],
+          innerConeDeg: 24,
+          outerConeDeg: 62,
+          range: 25,
+          falloff: 1.16,
           castShadows: true
         };
       }
 
       return {
         ...light,
-        intensity: 0.38,
+        pos: [3.4, 4.8, -3.8],
+        intensity: 0.32,
         color: [0.82, 0.88, 1.0],
         castShadows: false
       };
@@ -229,9 +324,9 @@ export default function App() {
 
     scene.shadowParams = {
       ...scene.shadowParams,
-      shadowStrength: 1.42,
-      ambientStrength: 0.14,
-      exposure: 1.1,
+      shadowStrength: 1.36,
+      ambientStrength: 0.15,
+      exposure: 1.08,
       hemisphereSkyColor: [0.74, 0.78, 0.86],
       hemisphereGroundColor: [0.18, 0.18, 0.16],
       lightDebugMode: 'final',
